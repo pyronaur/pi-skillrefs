@@ -9,6 +9,27 @@ import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import piSkillrefs from "../src/index.ts";
 
+function createEventBus() {
+	const handlers = new Map();
+
+	return {
+		on(name, handler) {
+			const list = handlers.get(name) ?? [];
+			list.push(handler);
+			handlers.set(name, list);
+			return () => {
+				const current = handlers.get(name) ?? [];
+				handlers.set(name, current.filter((item) => item !== handler));
+			};
+		},
+		emit(name, payload) {
+			for (const handler of handlers.get(name) ?? []) {
+				handler(payload);
+			}
+		},
+	};
+}
+
 function createCommand(name, source, path) {
 	return {
 		name,
@@ -87,6 +108,7 @@ function fakeThinkingExtension(pi) {
 function createHarness(commands, extensionOrder = ["skillrefs"]) {
 	const handlers = new Map();
 	const pi = {
+		events: createEventBus(),
 		on(name, handler) {
 			const list = handlers.get(name) ?? [];
 			list.push(handler);
@@ -106,6 +128,7 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 	}
 
 	return {
+		pi,
 		async emit(name, event = {}, ctx = {}) {
 			const list = handlers.get(name) ?? [];
 			let result;
@@ -237,6 +260,45 @@ async function runCompositionTest() {
 	}
 }
 
+async function runPiFzfpCompatibilityTest() {
+	const harness = createHarness([
+		createCommand("skill:commit", "skill", "/skills/commit/SKILL.md"),
+	]);
+	let acked = false;
+	harness.pi.events.emit("pi-fzfp:check-editor", () => {
+		acked = true;
+	});
+
+	const wrapAutocomplete = (provider) => ({ wrappedFrom: provider });
+	harness.pi.events.emit("pi-fzfp:provider", wrapAutocomplete);
+
+	const session = createUiSessionContext();
+
+	try {
+		await harness.emit("session_start", {}, session.ctx);
+		const installedFactory = session.getInstalledFactory();
+		assert.equal(acked, true);
+		assert.equal(typeof installedFactory, "function");
+
+		const editor = installedFactory(
+			{ requestRender() {} },
+			{ borderColor: (text) => text, selectList: {} },
+			{ matches: () => false },
+		);
+		const provider = createNullAutocompleteProvider();
+		editor.setAutocompleteProvider(provider);
+
+		assert.equal("wrappedFrom" in editor.autocompleteProvider, true);
+		assert.notEqual(editor.autocompleteProvider.wrappedFrom, provider);
+		assert.equal(
+			typeof editor.autocompleteProvider.wrappedFrom.getSuggestions,
+			"function",
+		);
+	} finally {
+		cleanupSession(session.sessionFile);
+	}
+}
+
 const dirsToRemove = [];
 
 afterEach(async () => {
@@ -251,4 +313,5 @@ void describe("pi-skillrefs", () => {
 	);
 	void test("keeps $ autocomplete when another editor extension installs first",
 		runCompositionTest);
+	void test("cooperates with pi-fzfp editor handshake", runPiFzfpCompatibilityTest);
 });

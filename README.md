@@ -15,3 +15,8 @@
 ```
 
 - The user-visible prompt text stays unchanged.
+
+## Compatibility
+
+- `pi-skillrefs` participates in `pi-fzfp`'s editor handshake so both packages can run together.
+- When `pi-skillrefs` owns the editor chain, it composes `pi-fzfp`'s autocomplete wrapper with its existing `$skill` autocomplete provider.

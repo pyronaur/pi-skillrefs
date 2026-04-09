@@ -15,6 +15,10 @@ import {
 } from "@siddr/pi-shared-qna/session-editor-component";
 import { buildInjectedSkillMessage } from "./injected-skill-message.js";
 import {
+	registerPiFzfpCompatibility,
+	type WrapAutocomplete,
+} from "./pi-fzfp-compat.js";
+import {
 	buildSkillAutocompleteItems,
 	collectDiscoveredSkills,
 	createMentionAutocompleteProvider,
@@ -103,6 +107,7 @@ function updateAutocomplete(editor: SkillRefsEditorTarget, data: string): void {
 
 class SkillRefsEditor extends CustomEditor {
 	private readonly getSkillItems: () => AutocompleteItem[];
+	private readonly wrapAutocomplete: WrapAutocomplete | undefined;
 
 	constructor(
 		tui: TUI,
@@ -110,14 +115,21 @@ class SkillRefsEditor extends CustomEditor {
 		options: {
 			keybindings: KeybindingsManager;
 			getSkillItems: () => AutocompleteItem[];
+			wrapAutocomplete: WrapAutocomplete | undefined;
 		},
 	) {
 		super(tui, theme, options.keybindings);
 		this.getSkillItems = options.getSkillItems;
+		this.wrapAutocomplete = options.wrapAutocomplete;
 	}
 
 	override setAutocompleteProvider(provider: AutocompleteProvider): void {
-		super.setAutocompleteProvider(createMentionAutocompleteProvider(provider, this.getSkillItems));
+		let nextProvider = createMentionAutocompleteProvider(provider, this.getSkillItems);
+		if (this.wrapAutocomplete) {
+			nextProvider = this.wrapAutocomplete(nextProvider);
+		}
+
+		super.setAutocompleteProvider(nextProvider);
 	}
 
 	override handleInput(data: string): void {
@@ -137,6 +149,7 @@ function markEnhanced(editor: SkillRefsRecord): void {
 function enhanceEditorWithSkillRefs<TEditor extends SkillRefsEditorTarget>(
 	editor: TEditor,
 	getSkillItems: () => AutocompleteItem[],
+	wrapAutocomplete: WrapAutocomplete | undefined,
 ): TEditor {
 	if (isEnhanced(editor)) {
 		return editor;
@@ -145,7 +158,12 @@ function enhanceEditorWithSkillRefs<TEditor extends SkillRefsEditorTarget>(
 
 	const baseSetAutocompleteProvider = editor.setAutocompleteProvider.bind(editor);
 	editor.setAutocompleteProvider = (provider: AutocompleteProvider) => {
-		baseSetAutocompleteProvider(createMentionAutocompleteProvider(provider, getSkillItems));
+		let nextProvider = createMentionAutocompleteProvider(provider, getSkillItems);
+		if (wrapAutocomplete) {
+			nextProvider = wrapAutocomplete(nextProvider);
+		}
+
+		baseSetAutocompleteProvider(nextProvider);
 	};
 
 	const baseHandleInput = editor.handleInput.bind(editor);
@@ -160,20 +178,22 @@ function enhanceEditorWithSkillRefs<TEditor extends SkillRefsEditorTarget>(
 function createEditorFactory(
 	previousFactory: SessionEditorComponentFactory | undefined,
 	getSkillItems: () => AutocompleteItem[],
+	wrapAutocomplete: WrapAutocomplete | undefined,
 ): SessionEditorComponentFactory {
 	return (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
 		const previousEditor = previousFactory?.(tui, theme, keybindings);
 		if (isSkillRefsEditorTarget(previousEditor)) {
-			return enhanceEditorWithSkillRefs(previousEditor, getSkillItems);
+			return enhanceEditorWithSkillRefs(previousEditor, getSkillItems, wrapAutocomplete);
 		}
 
-		return new SkillRefsEditor(tui, theme, { keybindings, getSkillItems });
+		return new SkillRefsEditor(tui, theme, { keybindings, getSkillItems, wrapAutocomplete });
 	};
 }
 
 function installEditor(
 	ctx: SkillRefsSessionContext,
 	getSkillItems: () => AutocompleteItem[],
+	wrapAutocomplete: WrapAutocomplete | undefined,
 ): void {
 	const componentContext = {
 		...(ctx.cwd === undefined ? {} : { cwd: ctx.cwd }),
@@ -186,13 +206,18 @@ function installEditor(
 
 	composeRememberedSessionEditorComponent(
 		componentContext,
-		(previousFactory) => createEditorFactory(previousFactory, getSkillItems),
+		(previousFactory) => createEditorFactory(previousFactory, getSkillItems, wrapAutocomplete),
 	);
 }
 
 export default function piSkillrefs(pi: ExtensionAPI): void {
 	let skillMap = new Map<string, string>();
 	let skillItems: AutocompleteItem[] = [];
+	let wrapAutocomplete: WrapAutocomplete | undefined;
+
+	registerPiFzfpCompatibility(pi, (nextWrapAutocomplete) => {
+		wrapAutocomplete = nextWrapAutocomplete;
+	});
 
 	function refreshSkillMap(): void {
 		skillMap = collectDiscoveredSkills(pi.getCommands());
@@ -205,7 +230,7 @@ export default function piSkillrefs(pi: ExtensionAPI): void {
 			return;
 		}
 
-		installEditor(ctx, () => skillItems);
+		installEditor(ctx, () => skillItems, wrapAutocomplete);
 	});
 
 	pi.on("resources_discover", () => {
