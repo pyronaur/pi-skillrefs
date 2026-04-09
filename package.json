@@ -1,0 +1,39 @@
+{
+	"name": "pi-skillrefs",
+	"private": true,
+	"type": "module",
+	"description": "Pi extension that autocompletes $skill refs and injects hidden skill context.",
+	"keywords": ["pi-package"],
+	"pi": {
+		"extensions": ["./src/index.ts"]
+	},
+	"scripts": {
+		"test": "tsx --test test/**/*.test.mjs",
+		"typecheck": "tsc --noEmit",
+		"lint": "oxlint --type-aware --tsconfig tsconfig.json src test",
+		"format": "dprint fmt",
+		"format:check": "dprint check",
+		"dupes": "jscpd --config .jscpd.json .",
+		"unused": "knip"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*",
+		"@mariozechner/pi-tui": "*"
+	},
+	"dependencies": {
+		"@siddr/pi-shared-qna": "^0.1.2"
+	},
+	"devDependencies": {
+		"@mariozechner/pi-coding-agent": "latest",
+		"@mariozechner/pi-tui": "latest",
+		"@types/node": "latest",
+		"dprint": "latest",
+		"jscpd": "latest",
+		"knip": "latest",
+		"oxlint": "latest",
+		"oxlint-plugin-inhuman": "latest",
+		"oxlint-tsgolint": "latest",
+		"tsx": "latest",
+		"typescript": "latest"
+	}
+}
