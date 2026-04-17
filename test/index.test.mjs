@@ -1,3 +1,4 @@
+import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import {
 	clearRememberedSessionEditorComponentFactory,
 	composeRememberedSessionEditorComponent,
@@ -8,6 +9,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import piSkillrefs from "../src/index.ts";
+import {
+	createCompactionEntry,
+	createCustomSkillEntry,
+	createSessionManager,
+	createUserEntry,
+} from "./session-fixtures.mjs";
 
 function createEventBus() {
 	const handlers = new Map();
@@ -107,12 +114,20 @@ function fakeThinkingExtension(pi) {
 
 function createHarness(commands, extensionOrder = ["skillrefs"]) {
 	const handlers = new Map();
+	const messageRenderers = new Map();
+	const sentMessages = [];
 	const pi = {
 		events: createEventBus(),
 		on(name, handler) {
 			const list = handlers.get(name) ?? [];
 			list.push(handler);
 			handlers.set(name, list);
+		},
+		registerMessageRenderer(customType, renderer) {
+			messageRenderers.set(customType, renderer);
+		},
+		sendMessage(message) {
+			sentMessages.push(message);
 		},
 		getCommands() {
 			return commands;
@@ -129,6 +144,12 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 
 	return {
 		pi,
+		getMessageRenderer(customType) {
+			return messageRenderers.get(customType);
+		},
+		getSentMessages() {
+			return sentMessages;
+		},
 		async emit(name, event = {}, ctx = {}) {
 			const list = handlers.get(name) ?? [];
 			let result;
@@ -207,10 +228,16 @@ async function runInstallEditorTest() {
 async function runInjectionTest() {
 	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
 	dirsToRemove.push(skillRoot);
-	const skillPath = join(skillRoot, "SKILL.md");
-	await writeFile(skillPath, "You should tell the user that it's bedtime.\n", "utf8");
+	const dayPath = join(skillRoot, "day.md");
+	const nightPath = join(skillRoot, "night.md");
+	await writeFile(dayPath, "You should tell the user that it's daytime.\n", "utf8");
+	await writeFile(nightPath, "You should tell the user that it's bedtime.\n", "utf8");
 
-	const harness = createHarness([createCommand("skill:day", "skill", skillPath)]);
+	const harness = createHarness([
+		createCommand("skill:day", "skill", dayPath),
+		createCommand("skill:night", "skill", nightPath),
+	]);
+	assert.equal(typeof harness.getMessageRenderer("skillrefs"), "function");
 	await harness.emit("resources_discover");
 
 	const inputResult = await harness.emit(
@@ -222,18 +249,140 @@ async function runInjectionTest() {
 
 	const agentStartResult = await harness.emit(
 		"before_agent_start",
-		{ prompt: "Hey nice $day isn't it", images: [], systemPrompt: "base" },
+		{ prompt: "Hey nice $day and $night", images: [], systemPrompt: "base" },
+		{},
+	);
+	assert.equal(agentStartResult, undefined);
+
+	const dayContent =
+		`<injected_skill ref="$day">\nYou should tell the user that it's daytime.\n</injected_skill>`;
+	const nightContent =
+		`<injected_skill ref="$night">\nYou should tell the user that it's bedtime.\n</injected_skill>`;
+	assert.deepEqual(harness.getSentMessages(), [
+		{
+			customType: "skillrefs",
+			content: dayContent,
+			display: true,
+			details: {
+				skill: {
+					ref: "$day",
+					label: "$day",
+					path: dayPath,
+					mode: "full",
+					tokenCount: estimateTokens({
+						role: "custom",
+						customType: "skillrefs",
+						content: dayContent,
+						display: true,
+						timestamp: 0,
+					}),
+				},
+			},
+		},
+		{
+			customType: "skillrefs",
+			content: nightContent,
+			display: true,
+			details: {
+				skill: {
+					ref: "$night",
+					label: "$night",
+					path: nightPath,
+					mode: "full",
+					tokenCount: estimateTokens({
+						role: "custom",
+						customType: "skillrefs",
+						content: nightContent,
+						display: true,
+						timestamp: 0,
+					}),
+				},
+			},
+		},
+	]);
+}
+
+async function runResolvedSkillNameTest() {
+	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
+	dirsToRemove.push(skillRoot);
+	const skillPath = join(skillRoot, "SKILL.md");
+	await writeFile(
+		skillPath,
+		"---\nname: day\ndescription: Day skill\n---\n\n# Day Skill\n\nRest.\n",
+		"utf8",
+	);
+
+	const harness = createHarness([createCommand("skill:day", "skill", skillPath)]);
+	await harness.emit("resources_discover");
+
+	const agentStartResult = await harness.emit(
+		"before_agent_start",
+		{ prompt: "Use $day", images: [], systemPrompt: "base" },
 		{},
 	);
 
-	assert.deepEqual(agentStartResult, {
-		message: {
-			customType: "skillrefs",
-			content:
-				`<injected_skill ref="$day">\nYou should tell the user that it's bedtime.\n</injected_skill>`,
-			display: false,
-		},
-	});
+	assert.equal(agentStartResult, undefined);
+	assert.equal(harness.getSentMessages()[0].details.skill.label, "Day Skill");
+}
+
+async function runReminderInjectionWhenSkillStillInContextTest() {
+	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
+	dirsToRemove.push(skillRoot);
+	const dayPath = join(skillRoot, "day.md");
+	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
+
+	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
+	await harness.emit("resources_discover");
+
+	const fullContent = `<injected_skill ref="$day">\n# Day Skill\n\nRest.\n</injected_skill>`;
+	const ctx = {
+		sessionManager: createSessionManager([
+			createUserEntry("u1", null, "Use $day"),
+			createCustomSkillEntry({ id: "s1", parentId: "u1", content: fullContent }),
+			createCompactionEntry("c1", "s1", "s1"),
+			createUserEntry("u2", "c1", "Use $day again"),
+		], "u2"),
+	};
+
+	await harness.emit(
+		"before_agent_start",
+		{ prompt: "Use $day again", images: [], systemPrompt: "base" },
+		ctx,
+	);
+
+	assert.equal(harness.getSentMessages()[0].content,
+		`<injected_skill ref="$day" path="${dayPath}">Reminder to use $day</injected_skill>`);
+	assert.equal(harness.getSentMessages()[0].details.skill.label, "Day Skill");
+	assert.equal(harness.getSentMessages()[0].details.skill.path, dayPath);
+	assert.equal(harness.getSentMessages()[0].details.skill.mode, "reminder");
+}
+
+async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
+	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
+	dirsToRemove.push(skillRoot);
+	const dayPath = join(skillRoot, "day.md");
+	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
+
+	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
+	await harness.emit("resources_discover");
+
+	const fullContent = `<injected_skill ref="$day">\n# Day Skill\n\nRest.\n</injected_skill>`;
+	const ctx = {
+		sessionManager: createSessionManager([
+			createUserEntry("u1", null, "Root"),
+			createCustomSkillEntry({ id: "s1", parentId: "u1", content: fullContent }),
+			createUserEntry("u2", "u1", "Other branch"),
+		], "u2"),
+	};
+
+	await harness.emit(
+		"before_agent_start",
+		{ prompt: "Use $day", images: [], systemPrompt: "base" },
+		ctx,
+	);
+
+	assert.equal(harness.getSentMessages()[0].content, fullContent);
+	assert.equal(harness.getSentMessages()[0].details.skill.mode, "full");
 }
 
 async function runCompositionTest() {
@@ -307,10 +456,12 @@ afterEach(async () => {
 
 void describe("pi-skillrefs", () => {
 	void test("installs a custom editor on session start", runInstallEditorTest);
-	void test(
-		"keeps user text unchanged and injects hidden skill context before the agent starts",
-		runInjectionTest,
-	);
+	void test("keeps user text unchanged and injects visible skill context", runInjectionTest);
+	void test("resolves skill summary names from skill headings", runResolvedSkillNameTest);
+	void test("injects only a reminder when the full skill text is still on the active path",
+		runReminderInjectionWhenSkillStillInContextTest);
+	void test("reinjects the full skill text when it exists only on an inactive branch",
+		runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest);
 	void test("keeps $ autocomplete when another editor extension installs first",
 		runCompositionTest);
 	void test("cooperates with pi-fzfp editor handshake", runPiFzfpCompatibilityTest);

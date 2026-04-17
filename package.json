@@ -2,7 +2,7 @@
 	"name": "pi-skillrefs",
 	"private": true,
 	"type": "module",
-	"description": "Pi extension that autocompletes $skill refs and injects hidden skill context.",
+	"description": "Pi extension that autocompletes $skill refs and injects visible skill context.",
 	"keywords": ["pi-package"],
 	"pi": {
 		"extensions": ["./src/index.ts"]

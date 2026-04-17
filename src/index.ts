@@ -13,11 +13,12 @@ import {
 	composeRememberedSessionEditorComponent,
 	type SessionEditorComponentFactory,
 } from "@siddr/pi-shared-qna/session-editor-component";
-import { buildInjectedSkillMessage } from "./injected-skill-message.js";
+import { buildInjectedSkillMessages } from "./injected-skill-message.js";
 import {
 	registerPiFzfpCompatibility,
 	type WrapAutocomplete,
 } from "./pi-fzfp-compat.js";
+import { renderSkillrefsMessage } from "./render-skillrefs-message.js";
 import {
 	buildSkillAutocompleteItems,
 	collectDiscoveredSkills,
@@ -214,6 +215,7 @@ export default function piSkillrefs(pi: ExtensionAPI): void {
 	let skillMap = new Map<string, string>();
 	let skillItems: AutocompleteItem[] = [];
 	let wrapAutocomplete: WrapAutocomplete | undefined;
+	pi.registerMessageRenderer("skillrefs", renderSkillrefsMessage);
 
 	registerPiFzfpCompatibility(pi, (nextWrapAutocomplete) => {
 		wrapAutocomplete = nextWrapAutocomplete;
@@ -241,18 +243,23 @@ export default function piSkillrefs(pi: ExtensionAPI): void {
 		return { action: "continue" };
 	});
 
-	pi.on("before_agent_start", async (event) => {
-		const message = await buildInjectedSkillMessage(event.prompt, skillMap);
-		if (!message) {
+	pi.on("before_agent_start", async (event, ctx) => {
+		const messages = await buildInjectedSkillMessages(event.prompt, skillMap, ctx.sessionManager);
+		if (!messages) {
 			return undefined;
 		}
 
-		return {
-			message: {
+		for (const message of messages) {
+			pi.sendMessage({
 				customType: "skillrefs",
-				content: message,
-				display: false,
-			},
-		};
+				content: message.content,
+				display: true,
+				details: {
+					skill: message.skill,
+				},
+			});
+		}
+
+		return undefined;
 	});
 }
