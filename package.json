@@ -32,9 +32,9 @@
 	"scripts": {
 		"test": "tsx --test test/**/*.test.mjs",
 		"typecheck": "tsc --noEmit",
-		"lint": "oxlint --type-aware --tsconfig tsconfig.json src test",
+		"lint": "oxlint --type-aware --tsconfig tsconfig.json .",
 		"format": "dprint fmt",
-		"format:check": "dprint check",
+		"format:check": "dprint check .",
 		"dupes": "jscpd --config .jscpd.json .",
 		"unused": "knip"
 	},
@@ -53,6 +53,7 @@
 		"jscpd": "latest",
 		"knip": "latest",
 		"oxlint": "latest",
+		"oxlint-plugin-complexity": "^2.1.1",
 		"oxlint-plugin-inhuman": "latest",
 		"oxlint-tsgolint": "latest",
 		"tsx": "latest",

@@ -4,13 +4,13 @@
 	format: {
 		name: "Check TypeScript formatting",
 		match: ["src/**/*.ts", "test/**/*.mjs", "dprint.json"],
-		run: "dprint check",
+		run: "dprint check .",
 	},
 
 	lint: {
 		name: "Lint TypeScript source",
 		match: ["src/**/*.ts", "test/**/*.mjs", ".oxlintrc.json", "tsconfig.json"],
-		run: "oxlint --type-aware --tsconfig tsconfig.json src test",
+		run: "oxlint --type-aware --tsconfig tsconfig.json .",
 	},
 
 	typecheck: {
@@ -29,6 +29,12 @@
 		name: "Detect TypeScript duplication",
 		match: ["src/**/*.ts", ".jscpd.json"],
 		run: "jscpd --config .jscpd.json .",
+	},
+
+	testDupes: {
+		name: "Check test duplication",
+		match: ["test/**/*.mjs", ".jscpd.tests.json"],
+		run: "jscpd --config .jscpd.tests.json .",
 	},
 
 	unused: {
