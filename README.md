@@ -1,5 +1,9 @@
 # pi-skillrefs
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/pyronaur/pi-skillrefs/main/docs/images/cover.jpg" alt="pi-skillrefs screenshot" width="1280" />
+</p>
+
 `pi-skillrefs` adds `$skill` autocomplete to Pi and injects referenced skill bodies as visible turn context.
 
 ## Install
