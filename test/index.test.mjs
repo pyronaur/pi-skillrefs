@@ -4,7 +4,7 @@ import {
 	composeRememberedSessionEditorComponent,
 } from "@siddr/pi-shared-qna/session-editor-component";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
@@ -232,6 +232,8 @@ async function runInjectionTest() {
 	const nightPath = join(skillRoot, "night.md");
 	await writeFile(dayPath, "You should tell the user that it's daytime.\n", "utf8");
 	await writeFile(nightPath, "You should tell the user that it's bedtime.\n", "utf8");
+	const dayRealPath = await realpath(dayPath);
+	const nightRealPath = await realpath(nightPath);
 
 	const harness = createHarness([
 		createCommand("skill:day", "skill", dayPath),
@@ -255,48 +257,44 @@ async function runInjectionTest() {
 	assert.equal(agentStartResult, undefined);
 
 	const dayContent =
-		`<injected_skill ref="$day">\nYou should tell the user that it's daytime.\n</injected_skill>`;
+		`<injected_skill ref="$day" path="${dayRealPath}">\nYou should tell the user that it's daytime.\n</injected_skill>`;
 	const nightContent =
-		`<injected_skill ref="$night">\nYou should tell the user that it's bedtime.\n</injected_skill>`;
+		`<injected_skill ref="$night" path="${nightRealPath}">\nYou should tell the user that it's bedtime.\n</injected_skill>`;
+	const content = `<environment_context>\n${dayContent}\n\n${nightContent}\n</environment_context>`;
 	assert.deepEqual(harness.getSentMessages(), [
 		{
 			customType: "skillrefs",
-			content: dayContent,
+			content,
 			display: true,
 			details: {
-				skill: {
-					ref: "$day",
-					label: "$day",
-					path: dayPath,
-					mode: "full",
-					tokenCount: estimateTokens({
-						role: "custom",
-						customType: "skillrefs",
-						content: dayContent,
-						display: true,
-						timestamp: 0,
-					}),
-				},
-			},
-		},
-		{
-			customType: "skillrefs",
-			content: nightContent,
-			display: true,
-			details: {
-				skill: {
-					ref: "$night",
-					label: "$night",
-					path: nightPath,
-					mode: "full",
-					tokenCount: estimateTokens({
-						role: "custom",
-						customType: "skillrefs",
-						content: nightContent,
-						display: true,
-						timestamp: 0,
-					}),
-				},
+				skills: [
+					{
+						ref: "$day",
+						label: "$day",
+						path: dayRealPath,
+						mode: "full",
+						tokenCount: estimateTokens({
+							role: "custom",
+							customType: "skillrefs",
+							content: dayContent,
+							display: true,
+							timestamp: 0,
+						}),
+					},
+					{
+						ref: "$night",
+						label: "$night",
+						path: nightRealPath,
+						mode: "full",
+						tokenCount: estimateTokens({
+							role: "custom",
+							customType: "skillrefs",
+							content: nightContent,
+							display: true,
+							timestamp: 0,
+						}),
+					},
+				],
 			},
 		},
 	]);
@@ -322,7 +320,7 @@ async function runResolvedSkillNameTest() {
 	);
 
 	assert.equal(agentStartResult, undefined);
-	assert.equal(harness.getSentMessages()[0].details.skill.label, "Day Skill");
+	assert.equal(harness.getSentMessages()[0].details.skills[0].label, "Day Skill");
 }
 
 async function runReminderInjectionWhenSkillStillInContextTest() {
@@ -330,15 +328,22 @@ async function runReminderInjectionWhenSkillStillInContextTest() {
 	dirsToRemove.push(skillRoot);
 	const dayPath = join(skillRoot, "day.md");
 	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
-
+	const dayRealPath = await realpath(dayPath);
 	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
 	await harness.emit("resources_discover");
-
-	const fullContent = `<injected_skill ref="$day">\n# Day Skill\n\nRest.\n</injected_skill>`;
+	const fullContent =
+		`<injected_skill ref="$day" path="${dayRealPath}">\n# Day Skill\n\nRest.\n</injected_skill>`;
 	const ctx = {
 		sessionManager: createSessionManager([
 			createUserEntry("u1", null, "Use $day"),
-			createCustomSkillEntry({ id: "s1", parentId: "u1", content: fullContent }),
+			createCustomSkillEntry({
+				id: "s1",
+				parentId: "u1",
+				content: `<environment_context>\n${fullContent}\n</environment_context>`,
+				details: {
+					skills: [{ ref: "$day", mode: "full" }],
+				},
+			}),
 			createCompactionEntry("c1", "s1", "s1"),
 			createUserEntry("u2", "c1", "Use $day again"),
 		], "u2"),
@@ -350,11 +355,13 @@ async function runReminderInjectionWhenSkillStillInContextTest() {
 		ctx,
 	);
 
-	assert.equal(harness.getSentMessages()[0].content,
-		`<injected_skill ref="$day" path="${dayPath}">Reminder to use $day</injected_skill>`);
-	assert.equal(harness.getSentMessages()[0].details.skill.label, "Day Skill");
-	assert.equal(harness.getSentMessages()[0].details.skill.path, dayPath);
-	assert.equal(harness.getSentMessages()[0].details.skill.mode, "reminder");
+	assert.equal(
+		harness.getSentMessages()[0].content,
+		`<environment_context>\n<injected_skill ref="$day" path="${dayRealPath}">Reminder to use $day</injected_skill>\n</environment_context>`,
+	);
+	assert.equal(harness.getSentMessages()[0].details.skills[0].label, "Day Skill");
+	assert.equal(harness.getSentMessages()[0].details.skills[0].path, dayRealPath);
+	assert.equal(harness.getSentMessages()[0].details.skills[0].mode, "reminder");
 }
 
 async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
@@ -362,11 +369,11 @@ async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
 	dirsToRemove.push(skillRoot);
 	const dayPath = join(skillRoot, "day.md");
 	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
-
+	const dayRealPath = await realpath(dayPath);
 	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
 	await harness.emit("resources_discover");
-
-	const fullContent = `<injected_skill ref="$day">\n# Day Skill\n\nRest.\n</injected_skill>`;
+	const fullContent =
+		`<injected_skill ref="$day" path="${dayRealPath}">\n# Day Skill\n\nRest.\n</injected_skill>`;
 	const ctx = {
 		sessionManager: createSessionManager([
 			createUserEntry("u1", null, "Root"),
@@ -381,8 +388,32 @@ async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
 		ctx,
 	);
 
-	assert.equal(harness.getSentMessages()[0].content, fullContent);
-	assert.equal(harness.getSentMessages()[0].details.skill.mode, "full");
+	assert.equal(harness.getSentMessages()[0].content,
+		`<environment_context>\n${fullContent}\n</environment_context>`);
+	assert.equal(harness.getSentMessages()[0].details.skills[0].mode, "full");
+}
+
+async function runResolvedPathInjectionTest() {
+	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
+	dirsToRemove.push(skillRoot);
+	const targetPath = join(skillRoot, "target.md");
+	const linkPath = join(skillRoot, "day-link.md");
+	await writeFile(targetPath, "# Day Skill\n\nRest.\n", "utf8");
+	await symlink(targetPath, linkPath);
+	const resolvedPath = await realpath(linkPath);
+	const harness = createHarness([createCommand("skill:day", "skill", linkPath)]);
+	await harness.emit("resources_discover");
+	await harness.emit(
+		"before_agent_start",
+		{ prompt: "Use $day", images: [], systemPrompt: "base" },
+		{},
+	);
+
+	assert.equal(
+		harness.getSentMessages()[0].content,
+		`<environment_context>\n<injected_skill ref="$day" path="${resolvedPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
+	);
+	assert.equal(harness.getSentMessages()[0].details.skills[0].path, resolvedPath);
 }
 
 async function runCompositionTest() {
@@ -462,6 +493,7 @@ void describe("pi-skillrefs", () => {
 		runReminderInjectionWhenSkillStillInContextTest);
 	void test("reinjects the full skill text when it exists only on an inactive branch",
 		runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest);
+	void test("injects resolved absolute skill paths", runResolvedPathInjectionTest);
 	void test("keeps $ autocomplete when another editor extension installs first",
 		runCompositionTest);
 	void test("cooperates with pi-fzfp editor handshake", runPiFzfpCompatibilityTest);

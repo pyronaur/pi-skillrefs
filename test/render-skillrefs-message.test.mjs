@@ -23,11 +23,12 @@ void describe("render-skillrefs-message", () => {
 		const rendered = renderSummary({
 			role: "custom",
 			customType: "skillrefs",
-			content: `<injected_skill ref="$day">\n# Day Skill\n\nRest.\n</injected_skill>`,
+			content:
+				`<environment_context>\n<injected_skill ref="$day">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
 			display: true,
 			timestamp: Date.now(),
 			details: {
-				skill: { ref: "$day", label: "Day Skill", tokenCount: 8230 },
+				skills: [{ ref: "$day", label: "Day Skill", tokenCount: 8230 }],
 			},
 		});
 
@@ -39,20 +40,43 @@ void describe("render-skillrefs-message", () => {
 			role: "custom",
 			customType: "skillrefs",
 			content:
-				`<injected_skill ref="$day" path="/tmp/day.md">Reminder to use $day</injected_skill>`,
+				`<environment_context>\n<injected_skill ref="$day" path="/tmp/day.md">Reminder to use $day</injected_skill>\n</environment_context>`,
 			display: true,
 			timestamp: Date.now(),
 			details: {
-				skill: {
+				skills: [{
 					ref: "$day",
 					label: "Day Skill",
 					path: "/tmp/day.md",
 					mode: "reminder",
 					tokenCount: 36,
-				},
+				}],
 			},
 		});
 
 		assert.deepEqual(rendered, ["Skill reminder: Day Skill (36 tokens)", "(Ctrl+O to expand)"]);
+	});
+
+	void test("renders multiple skills in one collapsed summary", () => {
+		const rendered = renderSummary({
+			role: "custom",
+			customType: "skillrefs",
+			content:
+				`<environment_context>\n<injected_skill ref="$day">\n# Day Skill\n</injected_skill>\n\n<injected_skill ref="$night">\n# Night Skill\n</injected_skill>\n</environment_context>`,
+			display: true,
+			timestamp: Date.now(),
+			details: {
+				skills: [
+					{ ref: "$day", label: "Day Skill", tokenCount: 10 },
+					{ ref: "$night", label: "Night Skill", tokenCount: 20 },
+				],
+			},
+		});
+
+		assert.deepEqual(rendered, [
+			"Skill: Day Skill (10 tokens)",
+			"Skill: Night Skill (20 tokens)",
+			"(Ctrl+O to expand)",
+		]);
 	});
 });

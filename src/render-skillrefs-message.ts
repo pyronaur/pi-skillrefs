@@ -1,13 +1,21 @@
 import { keyText, type MessageRenderer } from "@mariozechner/pi-coding-agent";
 import { Box, Text } from "@mariozechner/pi-tui";
+import {
+	SKILL_REMINDER_SUMMARY_TITLE,
+	SKILL_SUMMARY_TITLE,
+	SKILLREFS_COLLAPSED_VISIBLE_SKILLS,
+	SKILLREFS_EXPAND_FALLBACK,
+} from "./config/constants.js";
+import { TEMPLATE } from "./config/templates.js";
 import type { InjectedSkillDetails } from "./injected-skill-message.js";
 
 type SkillrefsMessageDetails = {
+	skills?: InjectedSkillDetails[];
 	skill?: InjectedSkillDetails;
 };
 
 function getExpandKey(): string {
-	return keyText("app.tools.expand") || "Ctrl+O";
+	return keyText("app.tools.expand") || SKILLREFS_EXPAND_FALLBACK;
 }
 
 function getTextContent(content: string | { type: string; text?: string }[]): string {
@@ -33,35 +41,53 @@ function formatSkillLine(
 	skill: InjectedSkillDetails,
 	theme: Parameters<MessageRenderer>[2],
 ): string {
-	const title = skill.mode === "reminder" ? "Skill reminder:" : "Skill:";
+	const title = skill.mode === "reminder"
+		? SKILL_REMINDER_SUMMARY_TITLE
+		: SKILL_SUMMARY_TITLE;
 	return theme.fg("customMessageLabel", title)
-		+ theme.fg("customMessageText",
-			` ${skill.label} (${formatTokenCount(skill.tokenCount)} tokens)`);
+		+ theme.fg(
+			"customMessageText",
+			` ${TEMPLATE.skillSummary(skill.label, formatTokenCount(skill.tokenCount))}`,
+		);
+}
+
+function readSkills(details: SkillrefsMessageDetails | undefined): InjectedSkillDetails[] {
+	if (details?.skills && details.skills.length > 0) {
+		return details.skills;
+	}
+	if (details?.skill) {
+		return [details.skill];
+	}
+
+	return [];
 }
 
 function buildCollapsedText(
-	skill: InjectedSkillDetails | undefined,
+	skills: InjectedSkillDetails[],
 	theme: Parameters<MessageRenderer>[2],
 ): string {
-	if (!skill) {
-		return theme.fg("dim", `(${getExpandKey()} to expand)`);
+	const expandHint = theme.fg("dim", TEMPLATE.expandHint(getExpandKey()));
+	if (skills.length === 0) {
+		return expandHint;
 	}
 
-	return [formatSkillLine(skill, theme), theme.fg("dim", `(${getExpandKey()} to expand)`)].join(
-		"\n",
-	);
+	const visibleSkills = skills.slice(0, SKILLREFS_COLLAPSED_VISIBLE_SKILLS);
+	return [...visibleSkills.map((skill) => formatSkillLine(skill, theme)), expandHint].join("\n");
 }
 
 function buildExpandedText(
 	content: string,
-	skill: InjectedSkillDetails | undefined,
+	skills: InjectedSkillDetails[],
 	theme: Parameters<MessageRenderer>[2],
 ): string {
-	if (!skill) {
+	if (skills.length === 0) {
 		return theme.fg("customMessageText", content);
 	}
 
-	return `${formatSkillLine(skill, theme)}\n\n${theme.fg("customMessageText", content)}`;
+	return TEMPLATE.expandedSkillSummaries(
+		skills.map((skill) => formatSkillLine(skill, theme)),
+		theme.fg("customMessageText", content),
+	);
 }
 
 export const renderSkillrefsMessage: MessageRenderer<SkillrefsMessageDetails> = (
@@ -71,10 +97,10 @@ export const renderSkillrefsMessage: MessageRenderer<SkillrefsMessageDetails> = 
 ) => {
 	const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
 	const content = getTextContent(message.content);
-	const skill = message.details?.skill;
+	const skills = readSkills(message.details);
 	const text = expanded
-		? buildExpandedText(content, skill, theme)
-		: buildCollapsedText(skill, theme);
+		? buildExpandedText(content, skills, theme)
+		: buildCollapsedText(skills, theme);
 	box.addChild(new Text(text, 0, 0));
 	return box;
 };

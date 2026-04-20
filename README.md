@@ -6,17 +6,24 @@
 
 - Type `$` in the editor to autocomplete discovered skills.
 - Keep the `$skill-name` token in the user prompt.
-- Before the agent runs, `pi-skillrefs` reads each referenced `SKILL.md` and injects one visible custom message per referenced skill, shaped like:
+- Before the agent runs, `pi-skillrefs` reads each referenced `SKILL.md` and injects one visible custom message containing one `<environment_context>` block with one `<injected_skill ...>` child per referenced skill, shaped like:
 
 ```xml
-<injected_skill ref="$day">
+<environment_context>
+<injected_skill ref="$day" path="/absolute/resolved/path/to/day/SKILL.md">
 ...
 </injected_skill>
+
+<injected_skill ref="$night" path="/absolute/resolved/path/to/night/SKILL.md">
+...
+</injected_skill>
+</environment_context>
 ```
 
 - The user-visible prompt text stays unchanged.
-- If the active Pi context already contains that skill's full injected block on the current path, `pi-skillrefs` injects a reminder block with the absolute skill path instead of repeating the full skill body.
-- The transcript shows one compact aside summary per injected skill, including resolved skill names when available and estimated token counts.
+- Every injected skill block includes both `ref` and the skill file's absolute symlink-resolved `path`.
+- If the active Pi context already contains that skill's full injected block on the current path, `pi-skillrefs` injects a reminder block with that same resolved absolute skill path instead of repeating the full skill body.
+- The transcript shows one compact aside summary for the injected message, including one line per visible referenced skill with resolved skill names when available and estimated token counts.
 - Expanding the custom message reveals the full raw injected block.
 
 ## Compatibility

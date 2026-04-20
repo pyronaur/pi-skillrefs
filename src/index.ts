@@ -13,6 +13,7 @@ import {
 	composeRememberedSessionEditorComponent,
 	type SessionEditorComponentFactory,
 } from "@siddr/pi-shared-qna/session-editor-component";
+import { SKILLREFS_MESSAGE_TYPE } from "./config/constants.js";
 import { buildInjectedSkillMessages } from "./injected-skill-message.js";
 import {
 	registerPiFzfpCompatibility,
@@ -251,11 +252,11 @@ export default function piSkillrefs(pi: ExtensionAPI): void {
 
 		for (const message of messages) {
 			pi.sendMessage({
-				customType: "skillrefs",
+				customType: SKILLREFS_MESSAGE_TYPE,
 				content: message.content,
 				display: true,
 				details: {
-					skill: message.skill,
+					skills: message.skills,
 				},
 			});
 		}

@@ -4,11 +4,14 @@ import {
 	parseFrontmatter,
 	type SessionEntry,
 } from "@mariozechner/pi-coding-agent";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
+import { SKILLREFS_MESSAGE_TYPE } from "./config/constants.js";
+import { TEMPLATE } from "./config/templates.js";
+import { SkillrefsContextMessage } from "./models/skillrefs-context-message.js";
 import { collectMentionedSkills, type MentionedSkill } from "./utils.js";
 
-type SkillInjectionMode = "full" | "reminder";
+export type SkillInjectionMode = "full" | "reminder";
 
 export type InjectedSkillDetails = {
 	ref: string;
@@ -20,7 +23,7 @@ export type InjectedSkillDetails = {
 
 type InjectedSkillMessage = {
 	content: string;
-	skill: InjectedSkillDetails;
+	skills: InjectedSkillDetails[];
 };
 
 const H1_PATTERN = /^#\s+(.+?)\s*$/m;
@@ -32,18 +35,8 @@ type SkillRefsSessionManager = {
 
 type SkillRefsMessageRecord = Record<string, unknown>;
 
-function buildInjectedSkillBlock(skill: MentionedSkill, content: string): string {
-	const text = content.trimEnd();
-	return `<injected_skill ref="$${skill.name}">\n${text}\n</injected_skill>`;
-}
-
 function escapeAttribute(value: string): string {
 	return value.replaceAll("&", "&amp;").replaceAll("\"", "&quot;");
-}
-
-function buildReminderInjectedSkillBlock(skill: MentionedSkill): string {
-	const path = escapeAttribute(resolve(skill.path));
-	return `<injected_skill ref="$${skill.name}" path="${path}">Reminder to use $${skill.name}</injected_skill>`;
 }
 
 function resolveSkillLabel(skill: MentionedSkill, content: string): string {
@@ -59,7 +52,7 @@ function resolveSkillLabel(skill: MentionedSkill, content: string): string {
 function estimateSkillTokens(content: string): number {
 	return estimateTokens({
 		role: "custom",
-		customType: "skillrefs",
+		customType: SKILLREFS_MESSAGE_TYPE,
 		content,
 		display: true,
 		timestamp: 0,
@@ -71,36 +64,76 @@ function isObject(value: unknown): value is SkillRefsMessageRecord {
 }
 
 function extractLegacyFullSkillRef(content: string): string | undefined {
-	const match = content.match(/^<injected_skill\s+ref=(?:"([^"]+)"|([^\s>]+))>/);
+	const match = content.match(
+		/^<injected_skill\s+ref=(?:"([^"]+)"|([^\s>]+))(?:\s+path=(?:"[^"]+"|[^\s>]+))?>\n?([\s\S]*?)<\/injected_skill>$/,
+	);
 	if (!match) {
 		return undefined;
 	}
-	if (content.includes(" path=")) {
+
+	const ref = match[1] ?? match[2];
+	if (!ref) {
+		return undefined;
+	}
+	if (match[3]?.trim() === TEMPLATE.skillReminder(ref)) {
 		return undefined;
 	}
 
-	return match[1] ?? match[2];
+	return ref;
 }
 
-function getInjectedSkillRef(message: unknown): string | undefined {
-	if (!isObject(message)) {
-		return undefined;
-	}
-	if (message.role !== "custom" || message.customType !== "skillrefs") {
-		return undefined;
+function readFullDetailRefs(details: unknown): string[] {
+	if (!isObject(details)) {
+		return [];
 	}
 
-	const details = isObject(message.details) ? message.details : undefined;
-	const skill = details && isObject(details.skill) ? details.skill : undefined;
-	if (skill?.mode === "full" && typeof skill.ref === "string") {
-		return skill.ref;
+	if (Array.isArray(details.skills)) {
+		return details.skills.flatMap((skill) => {
+			if (!isObject(skill)) {
+				return [];
+			}
+			if (skill.mode !== "full" || typeof skill.ref !== "string") {
+				return [];
+			}
+
+			return [skill.ref];
+		});
+	}
+
+	const legacySkill = isObject(details.skill) ? details.skill : undefined;
+	if (legacySkill?.mode === "full" && typeof legacySkill.ref === "string") {
+		return [legacySkill.ref];
+	}
+
+	return [];
+}
+
+function getInjectedSkillRefs(message: unknown): string[] {
+	if (!isObject(message)) {
+		return [];
+	}
+	if (message.role !== "custom" || message.customType !== SKILLREFS_MESSAGE_TYPE) {
+		return [];
+	}
+
+	const detailRefs = readFullDetailRefs(message.details);
+	if (detailRefs.length > 0) {
+		return detailRefs;
 	}
 
 	if (typeof message.content !== "string") {
-		return undefined;
+		return [];
 	}
 
-	return extractLegacyFullSkillRef(message.content);
+	const parsed = SkillrefsContextMessage.parse(message.content);
+	if (parsed) {
+		return parsed.skills
+			.filter((skill) => skill.mode === "full")
+			.map((skill) => skill.ref);
+	}
+
+	const ref = extractLegacyFullSkillRef(message.content);
+	return ref ? [ref] : [];
 }
 
 function collectFullSkillRefs(sessionManager?: SkillRefsSessionManager): Set<string> {
@@ -113,12 +146,9 @@ function collectFullSkillRefs(sessionManager?: SkillRefsSessionManager): Set<str
 	const context = buildSessionContext(entries, leafId).messages;
 	const refs = new Set<string>();
 	for (const message of context) {
-		const ref = getInjectedSkillRef(message);
-		if (!ref) {
-			continue;
+		for (const ref of getInjectedSkillRefs(message)) {
+			refs.add(ref);
 		}
-
-		refs.add(ref);
 	}
 
 	return refs;
@@ -127,20 +157,25 @@ function collectFullSkillRefs(sessionManager?: SkillRefsSessionManager): Set<str
 async function readInjectedSkillBlock(
 	skill: MentionedSkill,
 	mode: SkillInjectionMode,
-): Promise<(InjectedSkillDetails & { content: string }) | undefined> {
+): Promise<(InjectedSkillDetails & { body: string }) | undefined> {
 	try {
-		const raw = await readFile(skill.path, "utf8");
-		const path = resolve(skill.path);
-		const block = mode === "reminder"
-			? buildReminderInjectedSkillBlock(skill)
-			: buildInjectedSkillBlock(skill, raw);
+		const [raw, resolvedPath] = await Promise.all([
+			readFile(skill.path, "utf8"),
+			realpath(skill.path),
+		]);
+		const path = resolve(resolvedPath);
+		const ref = `$${skill.name}`;
+		const body = mode === "reminder" ? TEMPLATE.skillReminder(ref) : raw.trimEnd();
+		const content = mode === "reminder"
+			? TEMPLATE.injectedSkillReminder(ref, escapeAttribute(path))
+			: TEMPLATE.injectedSkill(ref, escapeAttribute(path), body);
 		return {
-			ref: `$${skill.name}`,
+			ref,
 			label: resolveSkillLabel(skill, raw),
-			tokenCount: estimateSkillTokens(block),
+			tokenCount: estimateSkillTokens(content),
 			path,
 			mode,
-			content: block,
+			body,
 		};
 	} catch {
 		return undefined;
@@ -168,5 +203,14 @@ export async function buildInjectedSkillMessages(
 		return undefined;
 	}
 
-	return blocks.map(({ content, ...skill }) => ({ content, skill }));
+	const content = SkillrefsContextMessage.create(blocks.map((block) => ({
+		ref: block.ref,
+		body: block.body,
+		path: block.path,
+		mode: block.mode,
+	}))).toString();
+	return [{
+		content,
+		skills: blocks.map(({ body: _body, ...skill }) => skill),
+	}];
 }
