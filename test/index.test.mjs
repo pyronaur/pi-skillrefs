@@ -161,6 +161,20 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 	};
 }
 
+async function createDaySkillHarness() {
+	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
+	dirsToRemove.push(skillRoot);
+	const dayPath = join(skillRoot, "day.md");
+	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
+	const dayRealPath = await realpath(dayPath);
+	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
+	await harness.emit("resources_discover");
+	const fullContent =
+		`<injected_skill ref="$day" path="${dayRealPath}">\n# Day Skill\n\nRest.\n</injected_skill>`;
+
+	return { dayRealPath, fullContent, harness };
+}
+
 function createUiSessionContext() {
 	const sessionFile = join(tmpdir(), `pi-skillrefs-${Date.now()}-${Math.random()}.json`);
 	let installedFactory;
@@ -324,15 +338,7 @@ async function runResolvedSkillNameTest() {
 }
 
 async function runReminderInjectionWhenSkillStillInContextTest() {
-	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
-	dirsToRemove.push(skillRoot);
-	const dayPath = join(skillRoot, "day.md");
-	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
-	const dayRealPath = await realpath(dayPath);
-	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
-	await harness.emit("resources_discover");
-	const fullContent =
-		`<injected_skill ref="$day" path="${dayRealPath}">\n# Day Skill\n\nRest.\n</injected_skill>`;
+	const { dayRealPath, fullContent, harness } = await createDaySkillHarness();
 	const ctx = {
 		sessionManager: createSessionManager([
 			createUserEntry("u1", null, "Use $day"),
@@ -365,15 +371,7 @@ async function runReminderInjectionWhenSkillStillInContextTest() {
 }
 
 async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
-	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-skill-"));
-	dirsToRemove.push(skillRoot);
-	const dayPath = join(skillRoot, "day.md");
-	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
-	const dayRealPath = await realpath(dayPath);
-	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
-	await harness.emit("resources_discover");
-	const fullContent =
-		`<injected_skill ref="$day" path="${dayRealPath}">\n# Day Skill\n\nRest.\n</injected_skill>`;
+	const { fullContent, harness } = await createDaySkillHarness();
 	const ctx = {
 		sessionManager: createSessionManager([
 			createUserEntry("u1", null, "Root"),

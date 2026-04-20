@@ -215,6 +215,12 @@ export async function buildInjectedSkillMessages(
 	}))).toString();
 	return [{
 		content,
-		skills: blocks.map(({ body: _body, ...skill }) => skill),
+		skills: blocks.map((block) => ({
+			ref: block.ref,
+			label: block.label,
+			tokenCount: block.tokenCount,
+			path: block.path,
+			mode: block.mode,
+		})),
 	}];
 }
