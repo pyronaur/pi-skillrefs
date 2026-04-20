@@ -1,33 +1,67 @@
 # pi-skillrefs
 
-`pi-skillrefs` is a fork of `pi-mention-skills` that keeps `$skill` autocomplete and injects referenced skill content as visible turn context.
+`pi-skillrefs` adds `$skill` autocomplete to Pi and injects referenced skill bodies as visible turn context.
 
-## Behavior
+## Install
 
-- Type `$` in the editor to autocomplete discovered skills.
-- Keep the `$skill-name` token in the user prompt.
-- Before the agent runs, `pi-skillrefs` reads each referenced `SKILL.md` and injects one visible custom message containing one `<environment_context>` block with one `<injected_skill ...>` child per referenced skill, shaped like:
+```bash
+pi install npm:pi-skillrefs
+```
+
+Or add it directly to Pi settings:
+
+```json
+{
+  "packages": ["npm:pi-skillrefs"]
+}
+```
+
+## What it does
+
+- Autocompletes discovered skills when you type `$` in the editor.
+- Keeps the `$skill-name` token in the user prompt.
+- Injects one visible `skillrefs` custom message per turn before the agent runs.
+- Aggregates multiple referenced skills into one `<environment_context>` wrapper.
+- Strips YAML frontmatter from full skill injections.
+- Resolves every skill `path` to an absolute symlink-resolved path.
+- Sends a reminder block instead of reinjecting the full body when that skill is already on the active session path.
+
+## Injected message shape
 
 ```xml
 <environment_context>
 <injected_skill ref="$day" path="/absolute/resolved/path/to/day/SKILL.md">
+# Day Skill
+
 ...
 </injected_skill>
 
 <injected_skill ref="$night" path="/absolute/resolved/path/to/night/SKILL.md">
+# Night Skill
+
 ...
 </injected_skill>
 </environment_context>
 ```
 
+Reminder injections keep the same wrapper and attributes, but replace the body with a short reminder string.
+
+## Transcript behavior
+
 - The user-visible prompt text stays unchanged.
-- Every injected skill block includes both `ref` and the skill file's absolute symlink-resolved `path`.
-- Full skill injections include the skill body only; YAML frontmatter is stripped before injection.
-- If the active Pi context already contains that skill's full injected block on the current path, `pi-skillrefs` injects a reminder block with that same resolved absolute skill path instead of repeating the full skill body.
-- The transcript shows one compact aside summary for the injected message, including one line per visible referenced skill with resolved skill names when available and estimated token counts.
-- Expanding the custom message reveals the full raw injected block.
+- The transcript shows one compact aside summary for the injected message, with one line per visible referenced skill and token counts.
+- Expanding the custom message reveals the raw injected XML.
 
 ## Compatibility
 
-- `pi-skillrefs` participates in `pi-fzfp`'s editor handshake so both packages can run together.
-- When `pi-skillrefs` owns the editor chain, it composes `pi-fzfp`'s autocomplete wrapper with its existing `$skill` autocomplete provider.
+- Composes with `pi-fzfp` through its editor handshake.
+- Uses Pi package metadata in `package.json`, so it loads through `pi install` and appears in the Pi package gallery contract for npm packages tagged with `pi-package`.
+
+## Development
+
+```bash
+npm test
+npm run typecheck
+npm run lint
+gate
+```

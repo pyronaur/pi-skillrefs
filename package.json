@@ -1,9 +1,28 @@
 {
 	"name": "pi-skillrefs",
-	"private": true,
+	"version": "0.1.0",
 	"type": "module",
-	"description": "Pi extension that autocompletes $skill refs and injects visible skill context.",
-	"keywords": ["pi-package"],
+	"description": "Pi extension package that autocompletes $skill refs and injects referenced skill bodies as visible environment context.",
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"skills",
+		"autocomplete"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/pyronaur/pi-skillrefs.git"
+	},
+	"homepage": "https://github.com/pyronaur/pi-skillrefs#readme",
+	"bugs": {
+		"url": "https://github.com/pyronaur/pi-skillrefs/issues"
+	},
 	"pi": {
 		"extensions": ["./src/index.ts"]
 	},
