@@ -234,28 +234,24 @@ async function runInjectionTest() {
 	await writeFile(nightPath, "You should tell the user that it's bedtime.\n", "utf8");
 	const dayRealPath = await realpath(dayPath);
 	const nightRealPath = await realpath(nightPath);
-
 	const harness = createHarness([
 		createCommand("skill:day", "skill", dayPath),
 		createCommand("skill:night", "skill", nightPath),
 	]);
 	assert.equal(typeof harness.getMessageRenderer("skillrefs"), "function");
 	await harness.emit("resources_discover");
-
 	const inputResult = await harness.emit(
 		"input",
 		{ text: "Hey nice $day isn't it", images: [], source: "interactive" },
 		{},
 	);
 	assert.deepEqual(inputResult, { action: "continue" });
-
 	const agentStartResult = await harness.emit(
 		"before_agent_start",
 		{ prompt: "Hey nice $day and $night", images: [], systemPrompt: "base" },
 		{},
 	);
 	assert.equal(agentStartResult, undefined);
-
 	const dayContent =
 		`<injected_skill ref="$day" path="${dayRealPath}">\nYou should tell the user that it's daytime.\n</injected_skill>`;
 	const nightContent =
@@ -312,7 +308,7 @@ async function runResolvedSkillNameTest() {
 
 	const harness = createHarness([createCommand("skill:day", "skill", skillPath)]);
 	await harness.emit("resources_discover");
-
+	const realSkillPath = await realpath(skillPath);
 	const agentStartResult = await harness.emit(
 		"before_agent_start",
 		{ prompt: "Use $day", images: [], systemPrompt: "base" },
@@ -321,6 +317,10 @@ async function runResolvedSkillNameTest() {
 
 	assert.equal(agentStartResult, undefined);
 	assert.equal(harness.getSentMessages()[0].details.skills[0].label, "Day Skill");
+	assert.equal(
+		harness.getSentMessages()[0].content,
+		`<environment_context>\n<injected_skill ref="$day" path="${realSkillPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
+	);
 }
 
 async function runReminderInjectionWhenSkillStillInContextTest() {

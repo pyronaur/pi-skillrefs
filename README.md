@@ -22,6 +22,7 @@
 
 - The user-visible prompt text stays unchanged.
 - Every injected skill block includes both `ref` and the skill file's absolute symlink-resolved `path`.
+- Full skill injections include the skill body only; YAML frontmatter is stripped before injection.
 - If the active Pi context already contains that skill's full injected block on the current path, `pi-skillrefs` injects a reminder block with that same resolved absolute skill path instead of repeating the full skill body.
 - The transcript shows one compact aside summary for the injected message, including one line per visible referenced skill with resolved skill names when available and estimated token counts.
 - Expanding the custom message reveals the full raw injected block.

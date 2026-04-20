@@ -49,6 +49,10 @@ function resolveSkillLabel(skill: MentionedSkill, content: string): string {
 	return `$${skill.name}`;
 }
 
+function resolveInjectedSkillBody(content: string): string {
+	return parseFrontmatter(content).body.trimEnd();
+}
+
 function estimateSkillTokens(content: string): number {
 	return estimateTokens({
 		role: "custom",
@@ -165,7 +169,7 @@ async function readInjectedSkillBlock(
 		]);
 		const path = resolve(resolvedPath);
 		const ref = `$${skill.name}`;
-		const body = mode === "reminder" ? TEMPLATE.skillReminder(ref) : raw.trimEnd();
+		const body = mode === "reminder" ? TEMPLATE.skillReminder(ref) : resolveInjectedSkillBody(raw);
 		const content = mode === "reminder"
 			? TEMPLATE.injectedSkillReminder(ref, escapeAttribute(path))
 			: TEMPLATE.injectedSkill(ref, escapeAttribute(path), body);
