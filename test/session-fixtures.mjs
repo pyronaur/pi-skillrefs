@@ -18,7 +18,7 @@ export function createCustomSkillEntry({ id, parentId, content, details }) {
 		id,
 		parentId,
 		timestamp: new Date(0).toISOString(),
-		customType: "skillrefs",
+		customType: "pi-skillrefs",
 		content,
 		display: true,
 		details,

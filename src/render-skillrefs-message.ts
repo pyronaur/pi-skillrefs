@@ -7,12 +7,11 @@ import {
 	SKILLREFS_EXPAND_FALLBACK,
 } from "./config/constants.js";
 import { TEMPLATE } from "./config/templates.js";
-import type { InjectedSkillDetails } from "./injected-skill-message.js";
-
-type SkillrefsMessageDetails = {
-	skills?: InjectedSkillDetails[];
-	skill?: InjectedSkillDetails;
-};
+import {
+	SkillrefsCustomMessages,
+	type SkillrefsMessageDetails,
+	type SkillrefsMessageSkill,
+} from "./models/SkillrefsCustomMessage.js";
 
 function getExpandKey(): string {
 	return keyText("app.tools.expand") || SKILLREFS_EXPAND_FALLBACK;
@@ -38,7 +37,7 @@ function formatTokenCount(tokens: number): string {
 }
 
 function formatSkillLine(
-	skill: InjectedSkillDetails,
+	skill: SkillrefsMessageSkill,
 	theme: Parameters<MessageRenderer>[2],
 ): string {
 	const title = skill.mode === "reminder"
@@ -51,19 +50,8 @@ function formatSkillLine(
 		);
 }
 
-function readSkills(details: SkillrefsMessageDetails | undefined): InjectedSkillDetails[] {
-	if (details?.skills && details.skills.length > 0) {
-		return details.skills;
-	}
-	if (details?.skill) {
-		return [details.skill];
-	}
-
-	return [];
-}
-
 function buildCollapsedText(
-	skills: InjectedSkillDetails[],
+	skills: SkillrefsMessageSkill[],
 	theme: Parameters<MessageRenderer>[2],
 ): string {
 	const expandHint = theme.fg("dim", TEMPLATE.expandHint(getExpandKey()));
@@ -77,7 +65,7 @@ function buildCollapsedText(
 
 function buildExpandedText(
 	content: string,
-	skills: InjectedSkillDetails[],
+	skills: SkillrefsMessageSkill[],
 	theme: Parameters<MessageRenderer>[2],
 ): string {
 	if (skills.length === 0) {
@@ -96,8 +84,11 @@ export const renderSkillrefsMessage: MessageRenderer<SkillrefsMessageDetails> = 
 	theme,
 ) => {
 	const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
-	const content = getTextContent(message.content);
-	const skills = readSkills(message.details);
+	const content = SkillrefsCustomMessages.expandedContent(
+		getTextContent(message.content),
+		message.details,
+	);
+	const skills = SkillrefsCustomMessages.skills(message.details);
 	const text = expanded
 		? buildExpandedText(content, skills, theme)
 		: buildCollapsedText(skills, theme);

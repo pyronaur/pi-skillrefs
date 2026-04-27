@@ -24,13 +24,14 @@ Or add it directly to Pi settings:
 
 - Autocompletes discovered skills when you type `$` in the editor.
 - Keeps the `$skill-name` token in the user prompt.
-- Injects one visible `skillrefs` custom message per turn before the agent runs.
-- Aggregates multiple referenced skills into one `<environment_context>` wrapper.
+- Injects one visible `pi-skillrefs` custom message per turn immediately after the referenced user message.
+- Stores compact content like `$day, $night` so `/tree` rows stay short.
+- Renders chat messages as skill summaries with token counts, while sending the model the full referenced skill bodies inside one `<environment_context>` wrapper.
 - Strips YAML frontmatter from full skill injections.
 - Resolves every skill `path` to an absolute symlink-resolved path.
 - Sends a reminder block instead of reinjecting the full body when that skill is already on the active session path.
 
-## Injected message shape
+## Injected model context shape
 
 ```xml
 <environment_context>
@@ -53,7 +54,9 @@ Reminder injections keep the same wrapper and attributes, but replace the body w
 ## Transcript behavior
 
 - The user-visible prompt text stays unchanged.
-- The transcript shows one compact aside summary for the injected message, with one line per visible referenced skill and token counts.
+- `/tree` navigation to a referenced user message excludes that turn's skill injection until the prompt is submitted again.
+- The chat transcript shows one compact aside summary per visible referenced skill, with token counts.
+- `/tree` shows the stored compact row: `[pi-skillrefs]: $skill`.
 - Expanding the custom message reveals the raw injected XML.
 
 ## Compatibility

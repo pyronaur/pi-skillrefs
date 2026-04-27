@@ -43,7 +43,8 @@
 		"@mariozechner/pi-tui": "*"
 	},
 	"dependencies": {
-		"@siddr/pi-shared-qna": "^0.1.2"
+		"@siddr/pi-shared-qna": "^0.1.2",
+		"typebox": "^1.1.33"
 	},
 	"devDependencies": {
 		"@mariozechner/pi-coding-agent": "^0.70.2",

@@ -115,7 +115,6 @@ function fakeThinkingExtension(pi) {
 function createHarness(commands, extensionOrder = ["skillrefs"]) {
 	const handlers = new Map();
 	const messageRenderers = new Map();
-	const sentMessages = [];
 	const pi = {
 		events: createEventBus(),
 		on(name, handler) {
@@ -125,9 +124,6 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 		},
 		registerMessageRenderer(customType, renderer) {
 			messageRenderers.set(customType, renderer);
-		},
-		sendMessage(message) {
-			sentMessages.push(message);
 		},
 		getCommands() {
 			return commands;
@@ -146,9 +142,6 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 		pi,
 		getMessageRenderer(customType) {
 			return messageRenderers.get(customType);
-		},
-		getSentMessages() {
-			return sentMessages;
 		},
 		async emit(name, event = {}, ctx = {}) {
 			const list = handlers.get(name) ?? [];
@@ -208,6 +201,11 @@ function cleanupSession(sessionFile) {
 	});
 }
 
+function getInjectedMessage(result) {
+	assert.ok(result?.message);
+	return result.message;
+}
+
 function createNullAutocompleteProvider() {
 	return {
 		async getSuggestions() {
@@ -252,7 +250,7 @@ async function runInjectionTest() {
 		createCommand("skill:day", "skill", dayPath),
 		createCommand("skill:night", "skill", nightPath),
 	]);
-	assert.equal(typeof harness.getMessageRenderer("skillrefs"), "function");
+	assert.equal(typeof harness.getMessageRenderer("pi-skillrefs"), "function");
 	await harness.emit("resources_discover");
 	const inputResult = await harness.emit(
 		"input",
@@ -265,49 +263,53 @@ async function runInjectionTest() {
 		{ prompt: "Hey nice $day and $night", images: [], systemPrompt: "base" },
 		{},
 	);
-	assert.equal(agentStartResult, undefined);
 	const dayContent =
 		`<injected_skill ref="$day" path="${dayRealPath}">\nYou should tell the user that it's daytime.\n</injected_skill>`;
 	const nightContent =
 		`<injected_skill ref="$night" path="${nightRealPath}">\nYou should tell the user that it's bedtime.\n</injected_skill>`;
 	const content = `<environment_context>\n${dayContent}\n\n${nightContent}\n</environment_context>`;
-	assert.deepEqual(harness.getSentMessages(), [
-		{
-			customType: "skillrefs",
-			content,
-			display: true,
-			details: {
-				skills: [
-					{
-						ref: "$day",
-						label: "$day",
-						path: dayRealPath,
-						mode: "full",
-						tokenCount: estimateTokens({
-							role: "custom",
-							customType: "skillrefs",
-							content: dayContent,
-							display: true,
-							timestamp: 0,
-						}),
-					},
-					{
-						ref: "$night",
-						label: "$night",
-						path: nightRealPath,
-						mode: "full",
-						tokenCount: estimateTokens({
-							role: "custom",
-							customType: "skillrefs",
-							content: nightContent,
-							display: true,
-							timestamp: 0,
-						}),
-					},
-				],
-			},
+	const message = getInjectedMessage(agentStartResult);
+	assert.deepEqual(message, {
+		customType: "pi-skillrefs",
+		content: "$day, $night",
+		display: true,
+		details: {
+			injectedContent: content,
+			skills: [
+				{
+					ref: "$day",
+					label: "$day",
+					path: dayRealPath,
+					mode: "full",
+					tokenCount: estimateTokens({
+						role: "custom",
+						customType: "pi-skillrefs",
+						content: dayContent,
+						display: true,
+						timestamp: 0,
+					}),
+				},
+				{
+					ref: "$night",
+					label: "$night",
+					path: nightRealPath,
+					mode: "full",
+					tokenCount: estimateTokens({
+						role: "custom",
+						customType: "pi-skillrefs",
+						content: nightContent,
+						display: true,
+						timestamp: 0,
+					}),
+				},
+			],
 		},
-	]);
+	});
+
+	const contextResult = await harness.emit("context", {
+		messages: [{ role: "custom", timestamp: 0, ...message }],
+	});
+	assert.equal(contextResult.messages[0].content, content);
 }
 
 async function runResolvedSkillNameTest() {
@@ -329,10 +331,11 @@ async function runResolvedSkillNameTest() {
 		{},
 	);
 
-	assert.equal(agentStartResult, undefined);
-	assert.equal(harness.getSentMessages()[0].details.skills[0].label, "Day Skill");
+	const message = getInjectedMessage(agentStartResult);
+	assert.equal(message.details.skills[0].label, "Day Skill");
+	assert.equal(message.content, "$day");
 	assert.equal(
-		harness.getSentMessages()[0].content,
+		message.details.injectedContent,
 		`<environment_context>\n<injected_skill ref="$day" path="${realSkillPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
 	);
 }
@@ -355,19 +358,21 @@ async function runReminderInjectionWhenSkillStillInContextTest() {
 		], "u2"),
 	};
 
-	await harness.emit(
+	const result = await harness.emit(
 		"before_agent_start",
 		{ prompt: "Use $day again", images: [], systemPrompt: "base" },
 		ctx,
 	);
+	const message = getInjectedMessage(result);
 
+	assert.equal(message.content, "$day");
 	assert.equal(
-		harness.getSentMessages()[0].content,
+		message.details.injectedContent,
 		`<environment_context>\n<injected_skill ref="$day" path="${dayRealPath}">Reminder to use $day</injected_skill>\n</environment_context>`,
 	);
-	assert.equal(harness.getSentMessages()[0].details.skills[0].label, "Day Skill");
-	assert.equal(harness.getSentMessages()[0].details.skills[0].path, dayRealPath);
-	assert.equal(harness.getSentMessages()[0].details.skills[0].mode, "reminder");
+	assert.equal(message.details.skills[0].label, "Day Skill");
+	assert.equal(message.details.skills[0].path, dayRealPath);
+	assert.equal(message.details.skills[0].mode, "reminder");
 }
 
 async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
@@ -380,15 +385,19 @@ async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
 		], "u2"),
 	};
 
-	await harness.emit(
+	const result = await harness.emit(
 		"before_agent_start",
 		{ prompt: "Use $day", images: [], systemPrompt: "base" },
 		ctx,
 	);
+	const message = getInjectedMessage(result);
 
-	assert.equal(harness.getSentMessages()[0].content,
-		`<environment_context>\n${fullContent}\n</environment_context>`);
-	assert.equal(harness.getSentMessages()[0].details.skills[0].mode, "full");
+	assert.equal(message.content, "$day");
+	assert.equal(
+		message.details.injectedContent,
+		`<environment_context>\n${fullContent}\n</environment_context>`,
+	);
+	assert.equal(message.details.skills[0].mode, "full");
 }
 
 async function runResolvedPathInjectionTest() {
@@ -401,17 +410,19 @@ async function runResolvedPathInjectionTest() {
 	const resolvedPath = await realpath(linkPath);
 	const harness = createHarness([createCommand("skill:day", "skill", linkPath)]);
 	await harness.emit("resources_discover");
-	await harness.emit(
+	const result = await harness.emit(
 		"before_agent_start",
 		{ prompt: "Use $day", images: [], systemPrompt: "base" },
 		{},
 	);
+	const message = getInjectedMessage(result);
 
+	assert.equal(message.content, "$day");
 	assert.equal(
-		harness.getSentMessages()[0].content,
+		message.details.injectedContent,
 		`<environment_context>\n<injected_skill ref="$day" path="${resolvedPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
 	);
-	assert.equal(harness.getSentMessages()[0].details.skills[0].path, resolvedPath);
+	assert.equal(message.details.skills[0].path, resolvedPath);
 }
 
 async function runCompositionTest() {

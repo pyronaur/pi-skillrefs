@@ -1,11 +1,7 @@
+import { type Static, Type } from "typebox";
 import { TEMPLATE } from "../config/templates.js";
 
-type SkillrefsContextBlockInput = {
-	ref: string;
-	body: string;
-	path?: string;
-	mode: "full" | "reminder";
-};
+export type SkillInjectionMode = Static<typeof SkillInjectionMode>;
 
 const ENVIRONMENT_CONTEXT_PATTERN =
 	/^\s*<environment_context>\s*([\s\S]*?)\s*<\/environment_context>\s*$/u;
@@ -52,13 +48,28 @@ type SkillrefsContextBlock = {
 	ref: string;
 	body: string;
 	path?: string;
-	mode: "full" | "reminder";
+	mode: SkillInjectionMode;
 };
+
+function renderSkill(skill: SkillrefsContextBlock): string {
+	if (skill.mode === "reminder" && skill.path) {
+		return TEMPLATE.injectedSkillReminder(
+			escapeXmlAttribute(skill.ref),
+			escapeXmlAttribute(skill.path),
+		);
+	}
+
+	return TEMPLATE.injectedSkill(
+		escapeXmlAttribute(skill.ref),
+		escapeXmlAttribute(skill.path ?? ""),
+		skill.body,
+	);
+}
 
 export class SkillrefsContextMessage {
 	readonly skills: SkillrefsContextBlock[];
 
-	constructor(skills: SkillrefsContextBlockInput[]) {
+	constructor(skills: SkillrefsContextBlock[]) {
 		this.skills = skills.map((skill) => ({
 			ref: skill.ref,
 			body: trimBody(skill.body),
@@ -67,7 +78,7 @@ export class SkillrefsContextMessage {
 		}));
 	}
 
-	static create(skills: SkillrefsContextBlockInput[]): SkillrefsContextMessage {
+	static create(skills: SkillrefsContextBlock[]): SkillrefsContextMessage {
 		return new SkillrefsContextMessage(skills);
 	}
 
@@ -108,22 +119,16 @@ export class SkillrefsContextMessage {
 		return new SkillrefsContextMessage(skills);
 	}
 
+	toSkillContent(): string[] {
+		return this.skills.map((skill) => renderSkill(skill));
+	}
+
 	toString(): string {
-		const body = this.skills.map((skill) => {
-			if (skill.mode === "reminder" && skill.path) {
-				return TEMPLATE.injectedSkillReminder(
-					escapeXmlAttribute(skill.ref),
-					escapeXmlAttribute(skill.path),
-				);
-			}
-
-			return TEMPLATE.injectedSkill(
-				escapeXmlAttribute(skill.ref),
-				escapeXmlAttribute(skill.path ?? ""),
-				skill.body,
-			);
-		}).join("\n\n");
-
-		return TEMPLATE.environmentContext(body);
+		return TEMPLATE.environmentContext(this.toSkillContent().join("\n\n"));
 	}
 }
+
+export const SkillInjectionMode = Type.Union([
+	Type.Literal("full"),
+	Type.Literal("reminder"),
+]);

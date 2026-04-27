@@ -13,8 +13,11 @@ import {
 	composeRememberedSessionEditorComponent,
 	type SessionEditorComponentFactory,
 } from "@siddr/pi-shared-qna/session-editor-component";
-import { SKILLREFS_MESSAGE_TYPE } from "./config/constants.js";
-import { buildInjectedSkillMessages } from "./injected-skill-message.js";
+import { buildInjectedSkillMessage } from "./injected-skill-message.js";
+import {
+	type SkillrefsCustomMessage,
+	SkillrefsCustomMessages,
+} from "./models/SkillrefsCustomMessage.js";
 import {
 	registerPiFzfpCompatibility,
 	type WrapAutocomplete,
@@ -216,7 +219,7 @@ export default function piSkillrefs(pi: ExtensionAPI): void {
 	let skillMap = new Map<string, string>();
 	let skillItems: AutocompleteItem[] = [];
 	let wrapAutocomplete: WrapAutocomplete | undefined;
-	pi.registerMessageRenderer("skillrefs", renderSkillrefsMessage);
+	pi.registerMessageRenderer(SkillrefsCustomMessages.type, renderSkillrefsMessage);
 
 	registerPiFzfpCompatibility(pi, (nextWrapAutocomplete) => {
 		wrapAutocomplete = nextWrapAutocomplete;
@@ -244,23 +247,22 @@ export default function piSkillrefs(pi: ExtensionAPI): void {
 		return { action: "continue" };
 	});
 
+	pi.on("context", (event) => {
+		return {
+			messages: event.messages.map((message) => SkillrefsCustomMessages.restoreContent(message)),
+		};
+	});
+
 	pi.on("before_agent_start", async (event, ctx) => {
-		const messages = await buildInjectedSkillMessages(event.prompt, skillMap, ctx.sessionManager);
-		if (!messages) {
+		const message = await buildInjectedSkillMessage(event.prompt, skillMap, ctx.sessionManager);
+		if (!message) {
 			return undefined;
 		}
 
-		for (const message of messages) {
-			pi.sendMessage({
-				customType: SKILLREFS_MESSAGE_TYPE,
-				content: message.content,
-				display: true,
-				details: {
-					skills: message.skills,
-				},
-			});
-		}
-
-		return undefined;
+		const customMessage: SkillrefsCustomMessage = SkillrefsCustomMessages.create(
+			message.content,
+			message.skills,
+		);
+		return { message: customMessage };
 	});
 }
