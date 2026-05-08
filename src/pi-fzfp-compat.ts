@@ -1,5 +1,5 @@
-import type { EventBus } from "@mariozechner/pi-coding-agent";
-import type { AutocompleteProvider } from "@mariozechner/pi-tui";
+import type { EventBus } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteProvider } from "@earendil-works/pi-tui";
 
 export type WrapAutocomplete = (provider: AutocompleteProvider) => AutocompleteProvider;
 

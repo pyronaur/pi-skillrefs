@@ -1,18 +1,15 @@
 import {
 	CustomEditor,
 	type ExtensionAPI,
+	type ExtensionUIContext,
 	type KeybindingsManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
 	EditorTheme,
 	TUI,
-} from "@mariozechner/pi-tui";
-import {
-	composeRememberedSessionEditorComponent,
-	type SessionEditorComponentFactory,
-} from "@siddr/pi-shared-qna/session-editor-component";
+} from "@earendil-works/pi-tui";
 import { buildInjectedSkillMessage } from "./injected-skill-message.js";
 import {
 	type SkillrefsCustomMessage,
@@ -44,17 +41,11 @@ type SkillRefsEditorTarget = {
 };
 
 type SkillRefsSessionContext = {
-	cwd?: string;
-	sessionManager?: {
-		getSessionFile?: () => string | undefined;
-		getSessionId?: () => string | undefined;
-	};
-	ui: {
-		setEditorComponent(factory: SessionEditorComponentFactory): void;
-	};
+	ui: Pick<ExtensionUIContext, "getEditorComponent" | "setEditorComponent">;
 };
 
 type SkillRefsRecord = Record<string | symbol, unknown>;
+type SessionEditorComponentFactory = Parameters<ExtensionUIContext["setEditorComponent"]>[0];
 
 const SKILL_REFS_EDITOR_ENHANCED = Symbol("skillrefs-editor-enhanced");
 
@@ -200,19 +191,8 @@ function installEditor(
 	getSkillItems: () => AutocompleteItem[],
 	wrapAutocomplete: WrapAutocomplete | undefined,
 ): void {
-	const componentContext = {
-		...(ctx.cwd === undefined ? {} : { cwd: ctx.cwd }),
-		...(ctx.sessionManager === undefined ? {} : { sessionManager: ctx.sessionManager }),
-		ui: {
-			setEditorComponent: (factory: SessionEditorComponentFactory | undefined) =>
-				ctx.ui.setEditorComponent(factory),
-		},
-	};
-
-	composeRememberedSessionEditorComponent(
-		componentContext,
-		(previousFactory) => createEditorFactory(previousFactory, getSkillItems, wrapAutocomplete),
-	);
+	const previousFactory = ctx.ui.getEditorComponent();
+	ctx.ui.setEditorComponent(createEditorFactory(previousFactory, getSkillItems, wrapAutocomplete));
 }
 
 export default function piSkillrefs(pi: ExtensionAPI): void {

@@ -3,7 +3,7 @@ import {
 	estimateTokens,
 	parseFrontmatter,
 	type SessionEntry,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { TEMPLATE } from "./config/templates.js";

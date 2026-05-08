@@ -1,5 +1,5 @@
-import type { SlashCommandInfo } from "@mariozechner/pi-coding-agent";
-import type { AutocompleteItem, AutocompleteProvider } from "@mariozechner/pi-tui";
+import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem, AutocompleteProvider } from "@earendil-works/pi-tui";
 
 const SKILL_COMMAND_PREFIX = "skill:";
 const MENTION_TOKEN_PATTERN = /(?:^|\s)\$([a-zA-Z0-9\-_]*)$/;

@@ -1,8 +1,4 @@
-import { estimateTokens } from "@mariozechner/pi-coding-agent";
-import {
-	clearRememberedSessionEditorComponentFactory,
-	composeRememberedSessionEditorComponent,
-} from "@siddr/pi-shared-qna/session-editor-component";
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import assert from "node:assert/strict";
 import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -106,9 +102,7 @@ async function updateAutocomplete(editor) {
 
 function fakeThinkingExtension(pi) {
 	pi.on("session_start", (_event, ctx) => {
-		composeRememberedSessionEditorComponent(ctx, () => {
-			return () => createThinkingEditor();
-		});
+		ctx.ui.setEditorComponent(() => createThinkingEditor());
 	});
 }
 
@@ -183,22 +177,15 @@ function createUiSessionContext() {
 				},
 			},
 			ui: {
+				getEditorComponent() {
+					return installedFactory;
+				},
 				setEditorComponent(factory) {
 					installedFactory = factory;
 				},
 			},
 		},
 	};
-}
-
-function cleanupSession(sessionFile) {
-	clearRememberedSessionEditorComponentFactory({
-		sessionManager: {
-			getSessionFile() {
-				return sessionFile;
-			},
-		},
-	});
 }
 
 function getInjectedMessage(result) {
@@ -229,12 +216,8 @@ async function runInstallEditorTest() {
 	]);
 	const session = createUiSessionContext();
 
-	try {
-		await harness.emit("session_start", {}, session.ctx);
-		assert.equal(typeof session.getInstalledFactory(), "function");
-	} finally {
-		cleanupSession(session.sessionFile);
-	}
+	await harness.emit("session_start", {}, session.ctx);
+	assert.equal(typeof session.getInstalledFactory(), "function");
 }
 
 async function runInjectionTest() {
@@ -432,21 +415,17 @@ async function runCompositionTest() {
 	);
 	const session = createUiSessionContext();
 
-	try {
-		await harness.emit("session_start", {}, session.ctx);
-		const installedFactory = session.getInstalledFactory();
-		assert.equal(typeof installedFactory, "function");
+	await harness.emit("session_start", {}, session.ctx);
+	const installedFactory = session.getInstalledFactory();
+	assert.equal(typeof installedFactory, "function");
 
-		const editor = installedFactory();
-		editor.setAutocompleteProvider(createNullAutocompleteProvider());
-		editor.handleInput("$");
-		await editor.tryTriggerAutocomplete();
+	const editor = installedFactory();
+	editor.setAutocompleteProvider(createNullAutocompleteProvider());
+	editor.handleInput("$");
+	await editor.tryTriggerAutocomplete();
 
-		assert.equal(editor.isShowingAutocomplete(), true);
-		assert.equal(editor.autocompleteItems[0]?.value, "$commit");
-	} finally {
-		cleanupSession(session.sessionFile);
-	}
+	assert.equal(editor.isShowingAutocomplete(), true);
+	assert.equal(editor.autocompleteItems[0]?.value, "$commit");
 }
 
 async function runPiFzfpCompatibilityTest() {
@@ -463,29 +442,25 @@ async function runPiFzfpCompatibilityTest() {
 
 	const session = createUiSessionContext();
 
-	try {
-		await harness.emit("session_start", {}, session.ctx);
-		const installedFactory = session.getInstalledFactory();
-		assert.equal(acked, true);
-		assert.equal(typeof installedFactory, "function");
+	await harness.emit("session_start", {}, session.ctx);
+	const installedFactory = session.getInstalledFactory();
+	assert.equal(acked, true);
+	assert.equal(typeof installedFactory, "function");
 
-		const editor = installedFactory(
-			{ requestRender() {} },
-			{ borderColor: (text) => text, selectList: {} },
-			{ matches: () => false },
-		);
-		const provider = createNullAutocompleteProvider();
-		editor.setAutocompleteProvider(provider);
+	const editor = installedFactory(
+		{ requestRender() {} },
+		{ borderColor: (text) => text, selectList: {} },
+		{ matches: () => false },
+	);
+	const provider = createNullAutocompleteProvider();
+	editor.setAutocompleteProvider(provider);
 
-		assert.equal("wrappedFrom" in editor.autocompleteProvider, true);
-		assert.notEqual(editor.autocompleteProvider.wrappedFrom, provider);
-		assert.equal(
-			typeof editor.autocompleteProvider.wrappedFrom.getSuggestions,
-			"function",
-		);
-	} finally {
-		cleanupSession(session.sessionFile);
-	}
+	assert.equal("wrappedFrom" in editor.autocompleteProvider, true);
+	assert.notEqual(editor.autocompleteProvider.wrappedFrom, provider);
+	assert.equal(
+		typeof editor.autocompleteProvider.wrappedFrom.getSuggestions,
+		"function",
+	);
 }
 
 const dirsToRemove = [];
