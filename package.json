@@ -1,6 +1,6 @@
 {
 	"name": "pi-skillrefs",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"type": "module",
 	"description": "Pi extension package that autocompletes $skill refs and injects referenced skill bodies as visible environment context.",
 	"files": [
