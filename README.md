@@ -67,8 +67,8 @@ Reminder injections keep the same wrapper and attributes, but replace the body w
 ## Development
 
 ```bash
-npm test
-npm run typecheck
-npm run lint
+pnpm test
+pnpm typecheck
+pnpm lint
 gate
 ```

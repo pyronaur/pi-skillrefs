@@ -22,7 +22,7 @@
 	test: {
 		name: "Run extension tests",
 		match: ["src/**/*.ts", "test/**/*.mjs", "package.json", "tsconfig.json"],
-		run: "npm test",
+		run: "pnpm test",
 	},
 
 	dupes: {
