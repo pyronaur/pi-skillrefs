@@ -3,6 +3,7 @@ import type { AutocompleteItem, AutocompleteProvider } from "@earendil-works/pi-
 
 const SKILL_COMMAND_PREFIX = "skill:";
 const MENTION_TOKEN_PATTERN = /(?:^|\s)\$([a-zA-Z0-9\-_]*)$/;
+const MENTION_TERMINATED_TOKEN_PATTERN = /(?:^|\s)\$[a-zA-Z0-9\-_]*\s+$/;
 const MENTION_GLOBAL_PATTERN = /(?:^|(?<=\s))\$([a-zA-Z][a-zA-Z0-9\-_]*)/g;
 
 type MentionedSkill = {
@@ -70,6 +71,10 @@ function applyMentionCompletion(args: CompletionArgs) {
 		cursorLine,
 		cursorCol: startCol + item.value.length,
 	};
+}
+
+function isTerminatedMentionTokenAtCursor(line: string, cursorCol: number): boolean {
+	return MENTION_TERMINATED_TOKEN_PATTERN.test(line.slice(0, cursorCol));
 }
 
 function copyOptionalMethod(target: unknown, baseProvider: unknown, name: string): void {
@@ -154,6 +159,11 @@ export function createMentionAutocompleteProvider(
 			}
 
 			const [lines, cursorLine, cursorCol, options] = args;
+			const line = lines[cursorLine] || "";
+			if (isTerminatedMentionTokenAtCursor(line, cursorCol)) {
+				return null;
+			}
+
 			const nextOptions = {
 				signal: options?.signal ?? AbortSignal.abort(),
 				...(options?.force === undefined ? {} : { force: options.force }),

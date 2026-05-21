@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import piSkillrefs from "../src/index.ts";
 import {
+	buildSkillAutocompleteItems,
+	createMentionAutocompleteProvider,
+} from "../src/utils.ts";
+import {
 	createCompactionEntry,
 	createCustomSkillEntry,
 	createSessionManager,
@@ -193,21 +197,46 @@ function getInjectedMessage(result) {
 	return result.message;
 }
 
+function applyAutocompleteCompletion(...args) {
+	const [lines, cursorLine, cursorCol, item, prefix] = args;
+	const line = lines[cursorLine] || "";
+	const startCol = cursorCol - prefix.length;
+	const newLine = line.slice(0, startCol) + item.value + line.slice(cursorCol);
+	const newLines = [...lines];
+	newLines[cursorLine] = newLine;
+	return { lines: newLines, cursorLine, cursorCol: startCol + item.value.length };
+}
+
 function createNullAutocompleteProvider() {
 	return {
 		async getSuggestions() {
 			return null;
 		},
-		applyCompletion(...args) {
-			const [lines, cursorLine, cursorCol, item, prefix] = args;
-			const line = lines[cursorLine] || "";
-			const startCol = cursorCol - prefix.length;
-			const newLine = line.slice(0, startCol) + item.value + line.slice(cursorCol);
-			const newLines = [...lines];
-			newLines[cursorLine] = newLine;
-			return { lines: newLines, cursorLine, cursorCol: startCol + item.value.length };
-		},
+		applyCompletion: applyAutocompleteCompletion,
 	};
+}
+
+function createFileAutocompleteProvider() {
+	return {
+		async getSuggestions() {
+			return { items: [{ value: "src/index.ts", label: "src/index.ts" }], prefix: "" };
+		},
+		applyCompletion: applyAutocompleteCompletion,
+	};
+}
+
+async function runAutocompleteCancelAfterSpaceTest() {
+	const provider = createMentionAutocompleteProvider(
+		createFileAutocompleteProvider(),
+		() => buildSkillAutocompleteItems(new Map([["day", "/skills/day/SKILL.md"]])),
+	);
+
+	assert.equal(await provider.getSuggestions(["$ "], 0, 2, {
+		signal: AbortSignal.abort(),
+	}), null);
+	assert.equal(await provider.getSuggestions(["Use $day "], 0, 9, {
+		signal: AbortSignal.abort(),
+	}), null);
 }
 
 async function runInstallEditorTest() {
@@ -480,5 +509,6 @@ void describe("pi-skillrefs", () => {
 	void test("injects resolved absolute skill paths", runResolvedPathInjectionTest);
 	void test("keeps $ autocomplete when another editor extension installs first",
 		runCompositionTest);
+	void test("cancels $ autocomplete after skill token space", runAutocompleteCancelAfterSpaceTest);
 	void test("cooperates with pi-fzfp editor handshake", runPiFzfpCompatibilityTest);
 });
