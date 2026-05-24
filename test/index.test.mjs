@@ -1,10 +1,23 @@
-import { estimateTokens } from "@earendil-works/pi-coding-agent";
+import {
+	AuthStorage,
+	createEventBus as createPiEventBus,
+	createExtensionRuntime,
+	createSyntheticSourceInfo,
+	estimateTokens,
+	ExtensionRunner,
+	ModelRegistry,
+	SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import assert from "node:assert/strict";
 import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import piSkillrefs from "../src/index.ts";
+import {
+	styleKnownSkillrefsInRenderedLine,
+	styleRenderedEditorLines,
+} from "../src/skillref-editor-styling.ts";
 import {
 	buildSkillAutocompleteItems,
 	createMentionAutocompleteProvider,
@@ -48,6 +61,46 @@ function createCommand(name, source, path) {
 			origin: "top-level",
 		},
 	};
+}
+
+function noop() {}
+
+function getUndefined() {
+	return undefined;
+}
+
+function getEmptyArray() {
+	return [];
+}
+
+function getFalse() {
+	return false;
+}
+
+function getTrue() {
+	return true;
+}
+
+function getThinkingOff() {
+	return "off";
+}
+
+function getEmptyString() {
+	return "";
+}
+
+function commandGetter(commands) {
+	return () => commands;
+}
+
+function runtimeCommandGetter(runtime) {
+	return () => runtime.getCommands();
+}
+
+function addHandler(handlers, name, handler) {
+	const list = handlers.get(name) ?? [];
+	list.push(handler);
+	handlers.set(name, list);
 }
 
 function createThinkingEditor() {
@@ -116,16 +169,10 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 	const pi = {
 		events: createEventBus(),
 		on(name, handler) {
-			const list = handlers.get(name) ?? [];
-			list.push(handler);
-			handlers.set(name, list);
+			addHandler(handlers, name, handler);
 		},
-		registerMessageRenderer(customType, renderer) {
-			messageRenderers.set(customType, renderer);
-		},
-		getCommands() {
-			return commands;
-		},
+		registerMessageRenderer: messageRenderers.set.bind(messageRenderers),
+		getCommands: commandGetter(commands),
 	};
 
 	for (const extensionName of extensionOrder) {
@@ -138,9 +185,7 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 
 	return {
 		pi,
-		getMessageRenderer(customType) {
-			return messageRenderers.get(customType);
-		},
+		getMessageRenderer: messageRenderers.get.bind(messageRenderers),
 		async emit(name, event = {}, ctx = {}) {
 			const list = handlers.get(name) ?? [];
 			let result;
@@ -150,6 +195,66 @@ function createHarness(commands, extensionOrder = ["skillrefs"]) {
 			return result;
 		},
 	};
+}
+
+function createRunnerHarness(commands) {
+	const extensionPath = "/tmp/pi-skillrefs.ts";
+	const runtime = createExtensionRuntime();
+	const handlers = new Map();
+	const messageRenderers = new Map();
+	const extension = {
+		path: extensionPath,
+		resolvedPath: extensionPath,
+		sourceInfo: createSyntheticSourceInfo("extension", extensionPath),
+		handlers,
+		tools: new Map(),
+		messageRenderers,
+		commands: new Map(),
+		flags: new Map(),
+		shortcuts: new Map(),
+	};
+	piSkillrefs({
+		events: createPiEventBus(),
+		on(name, handler) {
+			addHandler(handlers, name, handler);
+		},
+		registerMessageRenderer: messageRenderers.set.bind(messageRenderers),
+		getCommands: runtimeCommandGetter(runtime),
+	});
+	const runner = new ExtensionRunner(
+		[extension],
+		runtime,
+		process.cwd(),
+		SessionManager.inMemory(),
+		ModelRegistry.inMemory(AuthStorage.inMemory()),
+	);
+	runner.bindCore({
+		sendMessage: noop,
+		sendUserMessage: noop,
+		appendEntry: noop,
+		setSessionName: noop,
+		getSessionName: getUndefined,
+		setLabel: noop,
+		getActiveTools: getEmptyArray,
+		getAllTools: getEmptyArray,
+		setActiveTools: noop,
+		refreshTools: noop,
+		getCommands: commandGetter(commands),
+		setModel: getFalse,
+		getThinkingLevel: getThinkingOff,
+		setThinkingLevel: noop,
+	}, {
+		getModel: getUndefined,
+		isIdle: getTrue,
+		getSignal: getUndefined,
+		abort: noop,
+		hasPendingMessages: getFalse,
+		shutdown: noop,
+		getContextUsage: getUndefined,
+		compact: noop,
+		getSystemPrompt: getEmptyString,
+	});
+	return runner;
 }
 
 async function createDaySkillHarness() {
@@ -181,6 +286,14 @@ function createUiSessionContext() {
 				},
 			},
 			ui: {
+				theme: {
+					bold(text) {
+						return `<bold>${text}</bold>`;
+					},
+					fg(color, text) {
+						return `<${color}>${text}</${color}>`;
+					},
+				},
 				getEditorComponent() {
 					return installedFactory;
 				},
@@ -239,6 +352,24 @@ async function runAutocompleteCancelAfterSpaceTest() {
 	}), null);
 }
 
+async function runFuzzyAutocompleteTest() {
+	const provider = createMentionAutocompleteProvider(
+		createFileAutocompleteProvider(),
+		() =>
+			buildSkillAutocompleteItems(new Map([
+				["code-effect", "/skills/code-effect/SKILL.md"],
+				["code-ts", "/skills/code-ts/SKILL.md"],
+			])),
+	);
+
+	const suggestions = await provider.getSuggestions(["Use $cts"], 0, 8, {
+		signal: AbortSignal.abort(),
+	});
+
+	assert.equal(suggestions?.prefix, "$cts");
+	assert.equal(suggestions?.items[0]?.value, "$code-ts");
+}
+
 async function runInstallEditorTest() {
 	const harness = createHarness([
 		createCommand("skill:commit", "skill", "/skills/commit/SKILL.md"),
@@ -247,6 +378,30 @@ async function runInstallEditorTest() {
 
 	await harness.emit("session_start", {}, session.ctx);
 	assert.equal(typeof session.getInstalledFactory(), "function");
+}
+
+async function runExtensionRunnerInjectionTest() {
+	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-runner-"));
+	dirsToRemove.push(skillRoot);
+	const skillPath = join(skillRoot, "SKILL.md");
+	await writeFile(
+		skillPath,
+		"---\ntitle: Code TS\nsummary: TypeScript rules: strict imports\n---\n\n# Code TS\n\nUse strict types.\n",
+		"utf8",
+	);
+	const realSkillPath = await realpath(skillPath);
+	const runner = createRunnerHarness([createCommand("skill:code-ts", "skill", skillPath)]);
+
+	await runner.emitResourcesDiscover(process.cwd(), "startup");
+	const result = await runner.emitBeforeAgentStart("Use $code-ts", [], "base", {});
+	const message = result?.messages?.[0];
+	assert.equal(message?.customType, "pi-skillrefs");
+	assert.equal(message?.content, "$code-ts");
+	assert.match(message?.details.injectedContent ?? "", /Use strict types\./u);
+	assert.equal(message?.details.skills[0].path, realSkillPath);
+
+	const restored = await runner.emitContext([{ role: "custom", timestamp: 0, ...message }]);
+	assert.equal(restored[0].content, message.details.injectedContent);
 }
 
 async function runInjectionTest() {
@@ -492,6 +647,31 @@ async function runPiFzfpCompatibilityTest() {
 	);
 }
 
+function runInlineSkillrefStylingTest() {
+	const skills = new Map([["code-ts", "/skills/code-ts/SKILL.md"]]);
+	const styled = styleKnownSkillrefsInRenderedLine(
+		"Use $code-ts and $missing",
+		skills,
+		(ref) => `<accent>${ref}</accent>`,
+	);
+
+	assert.equal(styled, "Use <accent>$code-ts</accent> and $missing");
+}
+
+function runRenderedEditorStylingTest() {
+	const skills = new Map([["code-ts", "/skills/code-ts/SKILL.md"]]);
+	const lines = [
+		"\u001b[38;2;100;200;255m────\u001b[39m",
+		"Use $code-ts",
+		"\u001b[38;2;100;200;255m────\u001b[39m",
+		"→ $code-ts TypeScript Style",
+	];
+	const styled = styleRenderedEditorLines(lines, skills, (ref) => `<accent>${ref}</accent>`);
+
+	assert.equal(styled[1], "Use <accent>$code-ts</accent>");
+	assert.equal(styled[3], lines[3]);
+}
+
 const dirsToRemove = [];
 
 afterEach(async () => {
@@ -500,7 +680,10 @@ afterEach(async () => {
 
 void describe("pi-skillrefs", () => {
 	void test("installs a custom editor on session start", runInstallEditorTest);
+	void test("fuzzy matches skill names across hyphen boundaries", runFuzzyAutocompleteTest);
 	void test("keeps user text unchanged and injects visible skill context", runInjectionTest);
+	void test("injects and restores skill context through Pi ExtensionRunner",
+		runExtensionRunnerInjectionTest);
 	void test("resolves skill summary names from skill headings", runResolvedSkillNameTest);
 	void test("injects only a reminder when the full skill text is still on the active path",
 		runReminderInjectionWhenSkillStillInContextTest);
@@ -511,4 +694,6 @@ void describe("pi-skillrefs", () => {
 		runCompositionTest);
 	void test("cancels $ autocomplete after skill token space", runAutocompleteCancelAfterSpaceTest);
 	void test("cooperates with pi-fzfp editor handshake", runPiFzfpCompatibilityTest);
+	void test("styles known skill refs in rendered editor lines", runInlineSkillrefStylingTest);
+	void test("does not style autocomplete dropdown rows", runRenderedEditorStylingTest);
 });

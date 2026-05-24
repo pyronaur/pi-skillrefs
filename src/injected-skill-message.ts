@@ -1,7 +1,6 @@
 import {
 	buildSessionContext,
 	estimateTokens,
-	parseFrontmatter,
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { readFile, realpath } from "node:fs/promises";
@@ -23,6 +22,7 @@ type InjectedSkillMessage = {
 };
 
 const H1_PATTERN = /^#\s+(.+?)\s*$/m;
+const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u;
 
 type SkillRefsSessionManager = {
 	getEntries(): SessionEntry[];
@@ -32,7 +32,7 @@ type SkillRefsSessionManager = {
 type InjectedSkillBlock = SkillrefsMessageSkill & { body: string };
 
 function resolveSkillLabel(skill: MentionedSkill, content: string): string {
-	const { body } = parseFrontmatter(content);
+	const body = stripSkillFrontmatter(content);
 	const heading = body.match(H1_PATTERN)?.[1]?.trim();
 	if (heading) {
 		return heading;
@@ -41,8 +41,12 @@ function resolveSkillLabel(skill: MentionedSkill, content: string): string {
 	return `$${skill.name}`;
 }
 
+function stripSkillFrontmatter(content: string): string {
+	return content.replace(FRONTMATTER_PATTERN, "");
+}
+
 function resolveInjectedSkillBody(content: string): string {
-	return parseFrontmatter(content).body.trimEnd();
+	return stripSkillFrontmatter(content).trimEnd();
 }
 
 function estimateSkillTokens(content: string): number {

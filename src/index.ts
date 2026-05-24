@@ -20,6 +20,7 @@ import {
 	type WrapAutocomplete,
 } from "./pi-fzfp-compat.js";
 import { renderSkillrefsMessage } from "./render-skillrefs-message.js";
+import { installSkillrefEditorStyling } from "./skillref-editor-styling.js";
 import {
 	buildSkillAutocompleteItems,
 	collectDiscoveredSkills,
@@ -41,7 +42,7 @@ type SkillRefsEditorTarget = {
 };
 
 type SkillRefsSessionContext = {
-	ui: Pick<ExtensionUIContext, "getEditorComponent" | "setEditorComponent">;
+	ui: Pick<ExtensionUIContext, "getEditorComponent" | "setEditorComponent" | "theme">;
 };
 
 type SkillRefsRecord = Record<string | symbol, unknown>;
@@ -217,11 +218,10 @@ export default function piSkillrefs(pi: ExtensionAPI): void {
 		}
 
 		installEditor(ctx, () => skillItems, wrapAutocomplete);
+		installSkillrefEditorStyling(ctx.ui, () => skillMap);
 	});
 
-	pi.on("resources_discover", () => {
-		refreshSkillMap();
-	});
+	pi.on("resources_discover", refreshSkillMap);
 
 	pi.on("input", () => {
 		return { action: "continue" };

@@ -22,12 +22,13 @@ Or add it directly to Pi settings:
 
 ## What it does
 
-- Autocompletes discovered skills when you type `$` in the editor.
+- Autocompletes discovered skills when you type `$` in the editor, with fuzzy matching across separators.
+- Colors known inline `$skill` refs in the editor with the active theme accent color.
 - Keeps the `$skill-name` token in the user prompt.
 - Injects one visible `pi-skillrefs` custom message per turn immediately after the referenced user message.
 - Stores compact content like `$day, $night` so `/tree` rows stay short.
 - Renders chat messages as skill summaries with token counts, while sending the model the full referenced skill bodies inside one `<environment_context>` wrapper.
-- Strips YAML frontmatter from full skill injections.
+- Strips YAML frontmatter from full skill injections without requiring strict YAML metadata.
 - Resolves every skill `path` to an absolute symlink-resolved path.
 - Sends a reminder block instead of reinjecting the full body when that skill is already on the active session path.
 

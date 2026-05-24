@@ -5,6 +5,7 @@ const SKILL_COMMAND_PREFIX = "skill:";
 const MENTION_TOKEN_PATTERN = /(?:^|\s)\$([a-zA-Z0-9\-_]*)$/;
 const MENTION_TERMINATED_TOKEN_PATTERN = /(?:^|\s)\$[a-zA-Z0-9\-_]*\s+$/;
 const MENTION_GLOBAL_PATTERN = /(?:^|(?<=\s))\$([a-zA-Z][a-zA-Z0-9\-_]*)/g;
+const NO_MATCH = Number.NEGATIVE_INFINITY;
 
 type MentionedSkill = {
 	name: string;
@@ -32,6 +33,62 @@ function normalizeSkillName(commandName: string): string | undefined {
 	return name;
 }
 
+function normalizeQuery(query: string): string {
+	return query.toLowerCase().replace(/^\$/u, "");
+}
+
+function searchableText(text: string): string {
+	return text.toLowerCase().replace(/^\$/u, "");
+}
+
+function subsequenceScore(candidate: string, query: string): number {
+	let queryIndex = 0;
+	let gapPenalty = 0;
+	let previousMatch = -1;
+	for (let index = 0; index < candidate.length && queryIndex < query.length; index += 1) {
+		if (candidate[index] !== query[queryIndex]) {
+			continue;
+		}
+
+		if (previousMatch !== -1) {
+			gapPenalty += index - previousMatch - 1;
+		}
+		previousMatch = index;
+		queryIndex += 1;
+	}
+
+	if (queryIndex !== query.length) {
+		return NO_MATCH;
+	}
+
+	return 600 - gapPenalty * 4 - Math.max(0, candidate.length - query.length);
+}
+
+function textScore(text: string, query: string): number {
+	const candidate = searchableText(text);
+	if (candidate === query) {
+		return 1000;
+	}
+	if (candidate.startsWith(query)) {
+		return 900 - Math.max(0, candidate.length - query.length);
+	}
+
+	const includesIndex = candidate.indexOf(query);
+	if (includesIndex !== -1) {
+		return 800 - includesIndex * 5 - Math.max(0, candidate.length - query.length);
+	}
+
+	return subsequenceScore(candidate.replace(/[-_]/gu, ""), query.replace(/[-_]/gu, ""));
+}
+
+function itemScore(item: AutocompleteItem, query: string): number {
+	return Math.max(
+		textScore(item.label, query),
+		textScore(item.value, query),
+		textScore(item.description ?? "", query),
+	);
+}
+
 function findMentionSuggestions(
 	args: AutocompleteArgs,
 	getSkillItems: () => AutocompleteItem[],
@@ -43,14 +100,21 @@ function findMentionSuggestions(
 		return null;
 	}
 
-	const queryLower = mention.query.toLowerCase();
-	const items = getSkillItems().filter((item) => {
-		if (queryLower === "") {
-			return true;
+	const query = normalizeQuery(mention.query);
+	const items = getSkillItems().flatMap((item) => {
+		if (query === "") {
+			return [{ item, score: 0 }];
 		}
 
-		return item.label.toLowerCase().includes(queryLower);
-	});
+		const score = itemScore(item, query);
+		return score === NO_MATCH ? [] : [{ item, score }];
+	})
+		.sort((left, right) =>
+			right.score - left.score
+			|| left.item.value.length - right.item.value.length
+			|| left.item.value.localeCompare(right.item.value)
+		)
+		.map(({ item }) => item);
 	if (items.length === 0) {
 		return null;
 	}
