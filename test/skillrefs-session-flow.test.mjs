@@ -8,6 +8,7 @@ import {
 	createAgentSession,
 	DefaultResourceLoader,
 	getAgentDir,
+	InteractiveMode,
 	ModelRegistry,
 	SessionManager,
 	SettingsManager,
@@ -18,6 +19,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import piSkillrefs from "../src/index.ts";
+import {
+	createChatHost,
+	currentAddMessageToChat,
+	restoreInteractiveModePatch,
+	waitForRenderedChild,
+} from "./support/user-message-augmentation.mjs";
 
 const DAY_SKILL_BODY = "# Day Skill\n\nDAY_SKILL_SENTINEL\n";
 const LARGE_COMPACTION_PADDING = `COMPACTION_PADDING_SENTINEL\n${"x".repeat(200 * 1024)}`;
@@ -106,6 +113,18 @@ function installCompactionExtension(pi, firstKeptPrefix) {
 	});
 }
 
+function installTreeSummaryExtension(pi) {
+	pi.on("session_before_tree", (event) =>
+		event.preparation.userWantsSummary
+			? {
+				summary: {
+					summary: "TREE_SUMMARY_SENTINEL",
+					details: { source: "pi-skillrefs-session-flow-test" },
+				},
+			}
+			: undefined);
+}
+
 async function createSkillProject() {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-skillrefs-session-"));
 	dirsToRemove.push(cwd);
@@ -117,6 +136,82 @@ async function createSkillProject() {
 		"utf8",
 	);
 	return { cwd, skillDir };
+}
+
+const TEST_UI_THEME = {
+	bg(color, text) {
+		return `<bg:${color}>${text}</bg:${color}>`;
+	},
+	bold(text) {
+		return `<bold>${text}</bold>`;
+	},
+	fg(color, text) {
+		return `<${color}>${text}</${color}>`;
+	},
+};
+
+const BASE_UI_CONTEXT = {
+	async select() {
+		return undefined;
+	},
+	async confirm() {
+		return false;
+	},
+	async input() {
+		return undefined;
+	},
+	notify() {},
+	onTerminalInput() {
+		return () => undefined;
+	},
+	setStatus() {},
+	setWorkingMessage() {},
+	setWorkingVisible() {},
+	setWorkingIndicator() {},
+	setHiddenThinkingLabel() {},
+	setWidget() {},
+	setFooter() {},
+	setHeader() {},
+	setTitle() {},
+	async custom() {
+		return undefined;
+	},
+	pasteToEditor() {},
+	setEditorText() {},
+	getEditorText() {
+		return "";
+	},
+	async editor() {
+		return undefined;
+	},
+	addAutocompleteProvider() {},
+	theme: TEST_UI_THEME,
+	getAllThemes() {
+		return [];
+	},
+	getTheme() {
+		return undefined;
+	},
+	setTheme() {
+		return { success: false, error: "not implemented" };
+	},
+	getToolsExpanded() {
+		return true;
+	},
+	setToolsExpanded() {},
+};
+
+function createUiContext() {
+	let editorFactory;
+	return {
+		...BASE_UI_CONTEXT,
+		setEditorComponent(factory) {
+			editorFactory = factory;
+		},
+		getEditorComponent() {
+			return editorFactory;
+		},
+	};
 }
 
 async function createFlow(options = {}) {
@@ -139,6 +234,9 @@ async function createFlow(options = {}) {
 			(pi) => installCompactionExtension(pi, options.compactionFirstKeptPrefix),
 		]
 		: [piSkillrefs];
+	if (options.treeSummary) {
+		extensionFactories.push(installTreeSummaryExtension);
+	}
 	const resourceLoader = new DefaultResourceLoader({
 		cwd: project.cwd,
 		agentDir: getAgentDir(),
@@ -162,6 +260,9 @@ async function createFlow(options = {}) {
 		sessionManager: SessionManager.inMemory(project.cwd),
 		noTools: "builtin",
 	});
+	if (options.hasUI) {
+		await session.bindExtensions({ uiContext: createUiContext(), mode: "tui" });
+	}
 	return {
 		captures,
 		faux,
@@ -182,6 +283,7 @@ function assertNoPersistedSkillrefsMessages(sessionManager) {
 }
 
 afterEach(async () => {
+	restoreInteractiveModePatch();
 	await Promise.all(dirsToRemove.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -256,6 +358,57 @@ void test("tree navigation uses the arrived branch for skill reminder memory", {
 			skillModesAfterPrompt(lastProviderTurn(flow.captures), "Arrived branch $day", "$day"),
 			["full"],
 		);
+	} finally {
+		await flow.close();
+	}
+});
+
+void test("native skill rows match provider reminder mode after summarized tree navigation", {
+	timeout: 5000,
+}, async () => {
+	Reflect.set(InteractiveMode.prototype, "addMessageToChat", () => undefined);
+	const initialPrompt = "Initial branch $day";
+	const postCompactPrompt = "Post compact $day";
+	const repeatedPrompt = "After summary $day";
+	const flow = await createFlow({
+		compactionFirstKeptPrefix: initialPrompt,
+		hasUI: true,
+		treeSummary: true,
+	});
+	const { children, host } = createChatHost({ expanded: true });
+	flow.faux.setResponses([
+		captureText(flow.captures, "ASSISTANT_FIRST_DAY_SENTINEL"),
+		captureText(flow.captures, "ASSISTANT_ABANDONED_SENTINEL"),
+		captureText(flow.captures, "ASSISTANT_POST_COMPACT_DAY_SENTINEL"),
+		captureText(flow.captures, "ASSISTANT_AFTER_SUMMARY_DAY_SENTINEL"),
+	]);
+
+	try {
+		await flow.session.prompt(initialPrompt);
+		const firstAssistantEntry = flow.session.sessionManager.getEntries().find((entry) =>
+			entry.type === "message"
+			&& entry.message.role === "assistant"
+			&& contentText(entry.message.content) === "ASSISTANT_FIRST_DAY_SENTINEL"
+		);
+		assert.ok(firstAssistantEntry);
+		await flow.session.prompt("Abandoned branch");
+		await flow.session.compact();
+		await flow.session.prompt(postCompactPrompt);
+		await flow.session.navigateTree(firstAssistantEntry.id, { summarize: true });
+
+		currentAddMessageToChat().call(host, { role: "user", content: repeatedPrompt });
+		const visualContext = await waitForRenderedChild(children, 0, /<skill ref="\$day"/u);
+		await flow.session.prompt(repeatedPrompt);
+		const providerBlocks = injectedSkillBlocksAfterPrompt(
+			lastProviderTurn(flow.captures),
+			repeatedPrompt,
+			"$day",
+		);
+
+		assert.equal(providerBlocks.length, 1);
+		assert.doesNotMatch(providerBlocks[0] ?? "", /DAY_SKILL_SENTINEL/u);
+		assert.match(visualContext, /<skill ref="\$day"/u);
+		assert.doesNotMatch(visualContext, /DAY_SKILL_SENTINEL/u);
 	} finally {
 		await flow.close();
 	}

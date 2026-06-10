@@ -32,8 +32,12 @@ import {
 	createSessionManager,
 	createUserEntry,
 } from "./session-fixtures.mjs";
-
-const originalAddMessageToChat = Reflect.get(InteractiveMode.prototype, "addMessageToChat");
+import {
+	createChatHost,
+	currentAddMessageToChat,
+	restoreInteractiveModePatch,
+	waitForRenderedChild,
+} from "./support/user-message-augmentation.mjs";
 
 function createEventBus() {
 	const handlers = new Map();
@@ -314,61 +318,6 @@ function getInjectedProviderContent(result) {
 	assert.equal(message?.role, "user");
 	assert.equal(typeof message.content, "string");
 	return message.content;
-}
-
-function restoreInteractiveModePatch() {
-	Reflect.set(InteractiveMode.prototype, "addMessageToChat", originalAddMessageToChat);
-}
-
-function currentAddMessageToChat() {
-	const method = Reflect.get(InteractiveMode.prototype, "addMessageToChat");
-	assert.equal(typeof method, "function");
-	return function addMessageToChat(message, options) {
-		return method.call(this, message, options);
-	};
-}
-
-function createChatHost() {
-	const children = [];
-	return {
-		children,
-		host: {
-			chatContainer: {
-				addChild: children.push.bind(children),
-			},
-			getUserMessageText(message) {
-				return message.content;
-			},
-			keybindings: {
-				getKeys(keybinding) {
-					assert.equal(keybinding, "app.tools.expand");
-					return ["ctrl+o"];
-				},
-			},
-			toolOutputExpanded: false,
-			ui: {
-				requestRender() {},
-			},
-		},
-	};
-}
-
-function renderChildText(children, index) {
-	const child = children[index];
-	assert.ok(child);
-	return child.render(120).join("\n");
-}
-
-async function waitForRenderedChild(children, index, pattern) {
-	for (let attempt = 0; attempt < 25; attempt += 1) {
-		const text = renderChildText(children, index);
-		if (pattern.test(text)) {
-			return text;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-
-	return renderChildText(children, index);
 }
 
 function sessionContextFromEntries(entries, leafId) {

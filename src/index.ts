@@ -1,5 +1,4 @@
 import {
-	buildSessionContext,
 	type ContextEvent,
 	CustomEditor,
 	type ExtensionAPI,
@@ -29,6 +28,10 @@ import {
 } from "./pi-fzfp-compat.js";
 import { renderSkillrefsMessage } from "./render-skillrefs-message.js";
 import { installSkillrefEditorStyling } from "./skillref-editor-styling.js";
+import {
+	contextMessagesForSkillrefsRender,
+	sessionContextMessages,
+} from "./skillrefs-render-context.js";
 import { installSkillrefsUserMessageAugmentation } from "./skillrefs-user-message-augmentation.js";
 import {
 	buildSkillAutocompleteItems,
@@ -210,22 +213,6 @@ function hasRef(prompt: string, skillMap: Map<string, string>): boolean {
 	return collectMentionedSkills(prompt, skillMap).length > 0;
 }
 
-function sessionContextMessages(ctx: ExtensionContext): ContextEvent["messages"] | undefined {
-	const sessionManager = ctx.sessionManager;
-	if (
-		!sessionManager
-		|| typeof sessionManager.getEntries !== "function"
-		|| typeof sessionManager.getLeafId !== "function"
-	) {
-		return undefined;
-	}
-
-	return buildSessionContext(
-		sessionManager.getEntries(),
-		sessionManager.getLeafId(),
-	).messages;
-}
-
 function sessionBranch(ctx: ExtensionContext): readonly SessionEntry[] {
 	const sessionManager = ctx.sessionManager;
 	if (
@@ -329,7 +316,10 @@ function prepareSkillrefsUserMessageLoader(
 			input.state,
 			input.text,
 			await renderFullRefs.fullRefsFor({
-				messages: sessionContextMessages(input.ctx),
+				messages: contextMessagesForSkillrefsRender(input.ctx, {
+					text: input.text,
+					source: input.renderContext.source,
+				}),
 				buildContext: {
 					buildSkillrefsCustomMessage: (messageText, fullRefs) =>
 						buildSkillrefsCustomMessage(input.state, messageText, fullRefs),
