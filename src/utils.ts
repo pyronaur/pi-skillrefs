@@ -5,7 +5,6 @@ const SKILL_COMMAND_PREFIX = "skill:";
 const MENTION_TOKEN_PATTERN = /(?:^|\s)\$([a-zA-Z0-9\-_]*)$/;
 const MENTION_TERMINATED_TOKEN_PATTERN = /(?:^|\s)\$[a-zA-Z0-9\-_]*\s+$/;
 const MENTION_GLOBAL_PATTERN = /(?:^|(?<=\s))\$([a-zA-Z][a-zA-Z0-9\-_]*)/g;
-const NO_MATCH = Number.NEGATIVE_INFINITY;
 
 type MentionedSkill = {
 	name: string;
@@ -33,14 +32,6 @@ function normalizeSkillName(commandName: string): string | undefined {
 	return name;
 }
 
-function normalizeQuery(query: string): string {
-	return query.toLowerCase().replace(/^\$/u, "");
-}
-
-function searchableText(text: string): string {
-	return text.toLowerCase().replace(/^\$/u, "");
-}
-
 function subsequenceScore(candidate: string, query: string): number {
 	let queryIndex = 0;
 	let gapPenalty = 0;
@@ -58,14 +49,14 @@ function subsequenceScore(candidate: string, query: string): number {
 	}
 
 	if (queryIndex !== query.length) {
-		return NO_MATCH;
+		return Number.NEGATIVE_INFINITY;
 	}
 
 	return 600 - gapPenalty * 4 - Math.max(0, candidate.length - query.length);
 }
 
 function textScore(text: string, query: string): number {
-	const candidate = searchableText(text);
+	const candidate = text.toLowerCase().replace(/^\$/u, "");
 	if (candidate === query) {
 		return 1000;
 	}
@@ -78,14 +69,9 @@ function textScore(text: string, query: string): number {
 		return 800 - includesIndex * 5 - Math.max(0, candidate.length - query.length);
 	}
 
-	return subsequenceScore(candidate.replace(/[-_]/gu, ""), query.replace(/[-_]/gu, ""));
-}
-
-function itemScore(item: AutocompleteItem, query: string): number {
-	return Math.max(
-		textScore(item.label, query),
-		textScore(item.value, query),
-		textScore(item.description ?? "", query),
+	return subsequenceScore(
+		candidate.replace(/[-_]/gu, ""),
+		query.replace(/[-_]/gu, ""),
 	);
 }
 
@@ -100,14 +86,18 @@ function findMentionSuggestions(
 		return null;
 	}
 
-	const query = normalizeQuery(mention.query);
+	const query = mention.query.toLowerCase().replace(/^\$/u, "");
 	const items = getSkillItems().flatMap((item) => {
 		if (query === "") {
 			return [{ item, score: 0 }];
 		}
 
-		const score = itemScore(item, query);
-		return score === NO_MATCH ? [] : [{ item, score }];
+		const score = Math.max(
+			textScore(item.label, query),
+			textScore(item.value, query),
+			textScore(item.description ?? "", query),
+		);
+		return score === Number.NEGATIVE_INFINITY ? [] : [{ item, score }];
 	})
 		.sort((left, right) =>
 			right.score - left.score
@@ -173,8 +163,7 @@ export function buildSkillAutocompleteItems(skillMap: Map<string, string>): Auto
 export function collectDiscoveredSkills(commands: SlashCommandInfo[]): Map<string, string> {
 	const skills = new Map<string, string>();
 	for (const cmd of commands) {
-		const skillPath = cmd.sourceInfo?.path;
-		if (cmd.source !== "skill" || !skillPath) {
+		if (cmd.source !== "skill" || !cmd.sourceInfo?.path) {
 			continue;
 		}
 
@@ -183,7 +172,7 @@ export function collectDiscoveredSkills(commands: SlashCommandInfo[]): Map<strin
 			continue;
 		}
 
-		skills.set(name, skillPath);
+		skills.set(name, cmd.sourceInfo.path);
 	}
 	return skills;
 }

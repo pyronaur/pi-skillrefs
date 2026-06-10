@@ -4,7 +4,6 @@
 	"minTokens": 60,
 	"minLines": 7,
 	"formats": ["typescript", "javascript"],
-	"pattern": ["test/**/*.mjs"],
 	"ignore": [
 		"**/node_modules/**",
 		"**/.git/**",

@@ -93,10 +93,6 @@ function commandGetter(commands) {
 	return () => commands;
 }
 
-function runtimeCommandGetter(runtime) {
-	return () => runtime.getCommands();
-}
-
 function addHandler(handlers, name, handler) {
 	const list = handlers.get(name) ?? [];
 	list.push(handler);
@@ -219,7 +215,7 @@ function createRunnerHarness(commands) {
 			addHandler(handlers, name, handler);
 		},
 		registerMessageRenderer: messageRenderers.set.bind(messageRenderers),
-		getCommands: runtimeCommandGetter(runtime),
+		getCommands: () => runtime.getCommands(),
 	});
 	const runner = new ExtensionRunner(
 		[extension],

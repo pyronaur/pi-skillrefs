@@ -17,12 +17,8 @@ type SkillrefEditorUI = Pick<
 >;
 type StyleSkillref = (ref: string) => string;
 
-function stripAnsi(line: string): string {
-	return line.replace(ANSI_PATTERN, "");
-}
-
 function isDefaultEditorBoundary(line: string): boolean {
-	return EDITOR_BORDER_PATTERN.test(stripAnsi(line).trim());
+	return EDITOR_BORDER_PATTERN.test(line.replace(ANSI_PATTERN, "").trim());
 }
 
 function findDefaultEditorBoundaries(

@@ -45,20 +45,6 @@ function stripSkillFrontmatter(content: string): string {
 	return content.replace(FRONTMATTER_PATTERN, "");
 }
 
-function resolveInjectedSkillBody(content: string): string {
-	return stripSkillFrontmatter(content).trimEnd();
-}
-
-function estimateSkillTokens(content: string): number {
-	return estimateTokens({
-		role: "custom",
-		customType: SkillrefsCustomMessages.type,
-		content,
-		display: true,
-		timestamp: 0,
-	});
-}
-
 function collectFullSkillRefs(sessionManager?: SkillRefsSessionManager): Set<string> {
 	if (!sessionManager) {
 		return new Set();
@@ -66,9 +52,9 @@ function collectFullSkillRefs(sessionManager?: SkillRefsSessionManager): Set<str
 
 	const entries = sessionManager.getEntries();
 	const leafId = sessionManager.getLeafId();
-	const context = buildSessionContext(entries, leafId).messages;
+	const effectiveContextMessagesSnapshot = buildSessionContext(entries, leafId).messages;
 	const refs = new Set<string>();
-	for (const message of context) {
+	for (const message of effectiveContextMessagesSnapshot) {
 		for (const ref of SkillrefsCustomMessages.fullRefs(message)) {
 			refs.add(ref);
 		}
@@ -86,15 +72,23 @@ async function readInjectedSkillBlock(
 			readFile(skill.path, "utf8"),
 			realpath(skill.path),
 		]);
-		const path = resolve(resolvedPath);
+		const resolvedSkillPath = resolve(resolvedPath);
 		const ref = `$${skill.name}`;
-		const body = mode === "reminder" ? TEMPLATE.skillReminder(ref) : resolveInjectedSkillBody(raw);
-		const block = { ref, body, path, mode };
+		const body = mode === "reminder"
+			? TEMPLATE.skillReminder(ref)
+			: stripSkillFrontmatter(raw).trimEnd();
+		const block = { ref, body, path: resolvedSkillPath, mode };
 		const content = SkillrefsContextMessage.create([block]).toSkillContent()[0] ?? "";
 		return {
 			...block,
 			label: resolveSkillLabel(skill, raw),
-			tokenCount: estimateSkillTokens(content),
+			tokenCount: estimateTokens({
+				role: "custom",
+				customType: SkillrefsCustomMessages.type,
+				content,
+				display: true,
+				timestamp: 0,
+			}),
 		};
 	} catch {
 		return undefined;

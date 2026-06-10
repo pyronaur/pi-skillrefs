@@ -17,15 +17,6 @@ function escapeXmlAttribute(text: string): string {
 		.replaceAll("'", "&apos;");
 }
 
-function unescapeXmlAttribute(text: string): string {
-	return text
-		.replaceAll("&quot;", "\"")
-		.replaceAll("&lt;", "<")
-		.replaceAll("&gt;", ">")
-		.replaceAll("&apos;", "'")
-		.replaceAll("&amp;", "&");
-}
-
 function readAttributes(raw: string): Record<string, string> {
 	const attrs: Record<string, string> = {};
 	for (const match of raw.matchAll(ATTRIBUTE_PATTERN)) {
@@ -34,7 +25,12 @@ function readAttributes(raw: string): Record<string, string> {
 			continue;
 		}
 
-		attrs[key] = unescapeXmlAttribute(value ?? "");
+		attrs[key] = (value ?? "")
+			.replaceAll("&quot;", "\"")
+			.replaceAll("&lt;", "<")
+			.replaceAll("&gt;", ">")
+			.replaceAll("&apos;", "'")
+			.replaceAll("&amp;", "&");
 	}
 
 	return attrs;
@@ -64,6 +60,37 @@ function renderSkill(skill: SkillrefsContextBlock): string {
 		escapeXmlAttribute(skill.path ?? ""),
 		skill.body,
 	);
+}
+
+function inferSkillInjectionMode(
+	ref: string,
+	body: string,
+	path: string | undefined,
+): SkillInjectionMode {
+	if (path === undefined) {
+		return "full";
+	}
+	if (body !== TEMPLATE.skillReminder(ref)) {
+		return "full";
+	}
+
+	return "reminder";
+}
+
+function parseSkillBlock(rawAttrs: string, rawBody: string): SkillrefsContextBlock | null {
+	const attrs = readAttributes(rawAttrs);
+	const ref = attrs.ref;
+	if (!ref) {
+		return null;
+	}
+
+	const body = trimBody(rawBody);
+	return {
+		ref,
+		body,
+		mode: inferSkillInjectionMode(ref, body, attrs.path),
+		...(attrs.path === undefined ? {} : { path: attrs.path }),
+	};
 }
 
 export class SkillrefsContextMessage {
@@ -96,20 +123,12 @@ export class SkillrefsContextMessage {
 		const skills: SkillrefsContextBlock[] = [];
 		for (const blockMatch of body.matchAll(INJECTED_SKILL_PATTERN)) {
 			const [, rawAttrs = "", rawBody = ""] = blockMatch;
-			const attrs = readAttributes(rawAttrs);
-			const ref = attrs.ref;
-			if (!ref) {
+			const skill = parseSkillBlock(rawAttrs, rawBody);
+			if (!skill) {
 				continue;
 			}
 
-			skills.push({
-				ref,
-				body: trimBody(rawBody),
-				mode: attrs.path !== undefined && trimBody(rawBody) === TEMPLATE.skillReminder(ref)
-					? "reminder"
-					: "full",
-				...(attrs.path === undefined ? {} : { path: attrs.path }),
-			});
+			skills.push(skill);
 		}
 
 		if (skills.length === 0) {

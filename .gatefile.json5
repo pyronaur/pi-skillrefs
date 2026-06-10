@@ -8,9 +8,16 @@
 	},
 
 	lint: {
-		name: "Lint TypeScript source",
+		name: "Lint TypeScript source and tests",
 		match: ["src/**/*.ts", "test/**/*.mjs", ".oxlintrc.json", "tsconfig.json"],
-		run: "oxlint --type-aware --tsconfig tsconfig.json .",
+		run: {
+			label: "TypeScript lint",
+			cmd: "oxlint --type-aware --tsconfig tsconfig.json .",
+			guidance: [
+				"If addressing these lints would require unreasonable or hacky workarounds, stop and write a brief problem description to the user.",
+				"Exceptions are rare and reserved for edge cases where no clean solution exists.",
+			],
+		},
 	},
 
 	typecheck: {
@@ -26,20 +33,30 @@
 	},
 
 	dupes: {
-		name: "Detect TypeScript duplication",
+		name: "Detect runtime TypeScript duplication",
 		match: ["src/**/*.ts", ".jscpd.json"],
-		run: "jscpd --config .jscpd.json .",
+		run: "jscpd --config .jscpd.json src",
+	},
+
+	schemaDupes: {
+		name: "Detect TypeBox schema duplication",
+		match: [
+			"src/models/SkillrefsCustomMessage.ts",
+			"src/models/skillrefs-context-message.ts",
+			".jscpd.schemas.json",
+		],
+		run: "jscpd --config .jscpd.schemas.json src/models/SkillrefsCustomMessage.ts src/models/skillrefs-context-message.ts",
 	},
 
 	testDupes: {
 		name: "Check test duplication",
 		match: ["test/**/*.mjs", ".jscpd.tests.json"],
-		run: "jscpd --config .jscpd.tests.json .",
+		run: "jscpd --config .jscpd.tests.json test",
 	},
 
 	unused: {
-		name: "Check unused TypeScript code and package usage",
-		match: ["src/**/*.ts", "test/**/*.mjs", "knip.json", "tsconfig.json", "package.json"],
-		run: "knip",
+		name: "Check unused runtime TypeScript and package usage",
+		match: ["src/**/*.ts", "knip.json", "package.json"],
+		run: "knip --production",
 	},
 }

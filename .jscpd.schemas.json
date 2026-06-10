@@ -1,7 +1,8 @@
 {
-	"threshold": 0,
+	"threshold": 2,
 	"reporters": ["console"],
-	"minTokens": 40,
+	"mode": "strict",
+	"minTokens": 20,
 	"minLines": 3,
 	"formats": ["typescript", "javascript"],
 	"ignore": [
@@ -13,10 +14,6 @@
 		"**/out/**",
 		"**/tmp/**",
 		"**/.tmp/**",
-		"**/temp/**",
-		"**/test/**",
-		"**/tests/**",
-		"**/__tests__/**",
-		"**/*.test.*"
+		"**/temp/**"
 	]
 }

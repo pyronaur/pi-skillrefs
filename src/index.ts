@@ -46,7 +46,6 @@ type SkillRefsSessionContext = {
 };
 
 type SkillRefsRecord = Record<string | symbol, unknown>;
-type SessionEditorComponentFactory = Parameters<ExtensionUIContext["setEditorComponent"]>[0];
 
 const SKILL_REFS_EDITOR_ENHANCED = Symbol("skillrefs-editor-enhanced");
 
@@ -172,28 +171,20 @@ function enhanceEditorWithSkillRefs<TEditor extends SkillRefsEditorTarget>(
 	return editor;
 }
 
-function createEditorFactory(
-	previousFactory: SessionEditorComponentFactory | undefined,
-	getSkillItems: () => AutocompleteItem[],
-	wrapAutocomplete: WrapAutocomplete | undefined,
-): SessionEditorComponentFactory {
-	return (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
-		const previousEditor = previousFactory?.(tui, theme, keybindings);
-		if (isSkillRefsEditorTarget(previousEditor)) {
-			return enhanceEditorWithSkillRefs(previousEditor, getSkillItems, wrapAutocomplete);
-		}
-
-		return new SkillRefsEditor(tui, theme, { keybindings, getSkillItems, wrapAutocomplete });
-	};
-}
-
 function installEditor(
 	ctx: SkillRefsSessionContext,
 	getSkillItems: () => AutocompleteItem[],
 	wrapAutocomplete: WrapAutocomplete | undefined,
 ): void {
 	const previousFactory = ctx.ui.getEditorComponent();
-	ctx.ui.setEditorComponent(createEditorFactory(previousFactory, getSkillItems, wrapAutocomplete));
+	ctx.ui.setEditorComponent((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
+		const previousEditor = previousFactory?.(tui, theme, keybindings);
+		if (isSkillRefsEditorTarget(previousEditor)) {
+			return enhanceEditorWithSkillRefs(previousEditor, getSkillItems, wrapAutocomplete);
+		}
+
+		return new SkillRefsEditor(tui, theme, { keybindings, getSkillItems, wrapAutocomplete });
+	});
 }
 
 export default function piSkillrefs(pi: ExtensionAPI): void {
