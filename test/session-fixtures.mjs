@@ -38,12 +38,26 @@ export function createCompactionEntry(id, parentId, firstKeptEntryId) {
 }
 
 export function createSessionManager(entries, leafId) {
+	const entryById = new Map(entries.map((entry) => [entry.id, entry]));
 	return {
 		getEntries() {
 			return entries;
 		},
 		getLeafId() {
 			return leafId;
+		},
+		getBranch() {
+			const branch = [];
+			let currentId = leafId;
+			while (currentId) {
+				const entry = entryById.get(currentId);
+				if (!entry) {
+					break;
+				}
+				branch.unshift(entry);
+				currentId = entry.parentId;
+			}
+			return branch;
 		},
 	};
 }

@@ -1,8 +1,12 @@
 import {
+	buildSessionContext,
+	type ContextEvent,
 	CustomEditor,
 	type ExtensionAPI,
+	type ExtensionContext,
 	type ExtensionUIContext,
 	type KeybindingsManager,
+	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type {
 	AutocompleteItem,
@@ -11,6 +15,10 @@ import type {
 	TUI,
 } from "@earendil-works/pi-tui";
 import { buildInjectedSkillMessage } from "./injected-skill-message.js";
+import {
+	SkillrefsBranchState,
+	type SkillrefsRenderSource,
+} from "./models/SkillrefsBranchState.js";
 import {
 	type SkillrefsCustomMessage,
 	SkillrefsCustomMessages,
@@ -21,9 +29,11 @@ import {
 } from "./pi-fzfp-compat.js";
 import { renderSkillrefsMessage } from "./render-skillrefs-message.js";
 import { installSkillrefEditorStyling } from "./skillref-editor-styling.js";
+import { installSkillrefsUserMessageAugmentation } from "./skillrefs-user-message-augmentation.js";
 import {
 	buildSkillAutocompleteItems,
 	collectDiscoveredSkills,
+	collectMentionedSkills,
 	createMentionAutocompleteProvider,
 	findMentionTokenAtCursor,
 } from "./utils.js";
@@ -43,6 +53,15 @@ type SkillRefsEditorTarget = {
 
 type SkillRefsSessionContext = {
 	ui: Pick<ExtensionUIContext, "getEditorComponent" | "setEditorComponent" | "theme">;
+};
+type ContextMessage = ContextEvent["messages"][number];
+type UserContextMessage = ContextMessage & { role: "user" };
+type ProviderContextBuild = {
+	providerMessages: ContextEvent["messages"];
+	providerContext: ReturnType<SkillrefsBranchState["beginProviderContext"]>;
+};
+type UserMessageRenderContext = {
+	source: SkillrefsRenderSource;
 };
 
 type SkillRefsRecord = Record<string | symbol, unknown>;
@@ -187,53 +206,268 @@ function installEditor(
 	});
 }
 
+function hasRef(prompt: string, skillMap: Map<string, string>): boolean {
+	return collectMentionedSkills(prompt, skillMap).length > 0;
+}
+
+function sessionContextMessages(ctx: ExtensionContext): ContextEvent["messages"] | undefined {
+	const sessionManager = ctx.sessionManager;
+	if (
+		!sessionManager
+		|| typeof sessionManager.getEntries !== "function"
+		|| typeof sessionManager.getLeafId !== "function"
+	) {
+		return undefined;
+	}
+
+	return buildSessionContext(
+		sessionManager.getEntries(),
+		sessionManager.getLeafId(),
+	).messages;
+}
+
+function sessionBranch(ctx: ExtensionContext): readonly SessionEntry[] {
+	const sessionManager = ctx.sessionManager;
+	if (
+		!sessionManager
+		|| typeof sessionManager.getBranch !== "function"
+	) {
+		return [];
+	}
+
+	return sessionManager.getBranch();
+}
+
+type SkillrefsRuntimeState = {
+	skillMap: Map<string, string>;
+	skillItems: AutocompleteItem[];
+	skillrefsState: SkillrefsBranchState;
+	wrapAutocomplete: WrapAutocomplete | undefined;
+	renderOccurrenceIndex: number;
+	disableSkillrefsUserMessageAugmentation: (() => void) | undefined;
+};
+type RecordUserProviderMessageInput = {
+	state: SkillrefsRuntimeState;
+	build: ProviderContextBuild;
+	message: UserContextMessage;
+	index: number;
+};
+type PrepareSkillrefsUserMessageLoaderInput = {
+	state: SkillrefsRuntimeState;
+	text: string;
+	ctx: ExtensionContext;
+	renderContext: UserMessageRenderContext;
+};
+
+function createRuntimeState(): SkillrefsRuntimeState {
+	return {
+		skillMap: new Map(),
+		skillItems: [],
+		skillrefsState: SkillrefsBranchState.empty(),
+		wrapAutocomplete: undefined,
+		renderOccurrenceIndex: 0,
+		disableSkillrefsUserMessageAugmentation: undefined,
+	};
+}
+
+function refreshSkillMap(pi: ExtensionAPI, state: SkillrefsRuntimeState): void {
+	state.skillMap = collectDiscoveredSkills(pi.getCommands());
+	state.skillItems = buildSkillAutocompleteItems(state.skillMap);
+}
+
+function rebuildSkillrefsBranchState(
+	state: SkillrefsRuntimeState,
+	ctx: ExtensionContext,
+	knownFullRefs: Iterable<string> = [],
+): void {
+	const messages = sessionContextMessages(ctx);
+	if (!messages) {
+		state.skillrefsState = SkillrefsBranchState.empty();
+		state.renderOccurrenceIndex = 0;
+		return;
+	}
+
+	state.skillrefsState = SkillrefsBranchState.fromMessages(
+		messages,
+		knownFullRefs,
+		sessionBranch(ctx),
+	);
+	state.renderOccurrenceIndex = 0;
+}
+
+function stopSession(state: SkillrefsRuntimeState): void {
+	state.disableSkillrefsUserMessageAugmentation?.();
+	state.disableSkillrefsUserMessageAugmentation = undefined;
+	state.skillrefsState = SkillrefsBranchState.empty();
+	state.renderOccurrenceIndex = 0;
+}
+
+async function buildSkillrefsCustomMessage(
+	state: SkillrefsRuntimeState,
+	prompt: string,
+	fullSkillRefs: Set<string>,
+): Promise<SkillrefsCustomMessage | undefined> {
+	if (!hasRef(prompt, state.skillMap)) {
+		return undefined;
+	}
+
+	const message = await buildInjectedSkillMessage(prompt, state.skillMap, { fullSkillRefs });
+	return message ? SkillrefsCustomMessages.create(message.content, message.skills) : undefined;
+}
+
+function prepareSkillrefsUserMessageLoader(
+	input: PrepareSkillrefsUserMessageLoaderInput,
+): () => Promise<SkillrefsCustomMessage | undefined> {
+	const renderFullRefs = input.state.skillrefsState.prepareRenderFullRefs({
+		index: input.state.renderOccurrenceIndex,
+		text: input.text,
+		source: input.renderContext.source,
+	});
+	input.state.renderOccurrenceIndex += 1;
+	return async () =>
+		buildSkillrefsCustomMessage(
+			input.state,
+			input.text,
+			await renderFullRefs.fullRefsFor({
+				messages: sessionContextMessages(input.ctx),
+				buildContext: {
+					buildSkillrefsCustomMessage: (messageText, fullRefs) =>
+						buildSkillrefsCustomMessage(input.state, messageText, fullRefs),
+				},
+			}),
+		);
+}
+
+async function recordUserProviderMessage(
+	input: RecordUserProviderMessageInput,
+): Promise<void> {
+	const plan = input.build.providerContext.planUserMessage(input.message, input.index);
+	if (plan.action !== "inject") {
+		return;
+	}
+
+	const skillrefsMessage = await buildSkillrefsCustomMessage(
+		input.state,
+		plan.text,
+		new Set(plan.fullRefsBefore),
+	);
+	input.build.providerContext.recordInjection(plan, skillrefsMessage);
+	const injectedContent = skillrefsMessage?.details.injectedContent;
+	if (!injectedContent) {
+		return;
+	}
+
+	input.build.providerMessages.push({
+		role: "user",
+		content: injectedContent,
+		timestamp: input.message.timestamp,
+	});
+}
+
+async function buildProviderContextMessages(
+	state: SkillrefsRuntimeState,
+	messages: ContextEvent["messages"],
+	ctx: ExtensionContext,
+): Promise<ContextEvent["messages"]> {
+	const providerContext = state.skillrefsState.beginProviderContext(messages, sessionBranch(ctx));
+	const build: ProviderContextBuild = {
+		providerMessages: [],
+		providerContext,
+	};
+
+	for (const [index, message] of messages.entries()) {
+		const restoredMessage = SkillrefsCustomMessages.restoreContent(message);
+		build.providerMessages.push(restoredMessage);
+
+		if (message.role === "user") {
+			await recordUserProviderMessage({ state, build, message, index });
+			continue;
+		}
+
+		build.providerContext.recordContextMessage(message);
+	}
+
+	state.skillrefsState = SkillrefsBranchState.fromRefInjectionState(providerContext.finish());
+	return build.providerMessages;
+}
+
+function installSessionUi(ctx: SkillRefsSessionContext, state: SkillrefsRuntimeState): void {
+	installEditor(ctx, () => state.skillItems, state.wrapAutocomplete);
+	installSkillrefEditorStyling(ctx.ui, () => state.skillMap);
+}
+
+function installUserMessageAugmentation(
+	pi: ExtensionAPI,
+	state: SkillrefsRuntimeState,
+	ctx: ExtensionContext,
+): void {
+	state.disableSkillrefsUserMessageAugmentation = installSkillrefsUserMessageAugmentation({
+		theme: ctx.ui.theme,
+		refsForText(text) {
+			refreshSkillMap(pi, state);
+			return collectMentionedSkills(text, state.skillMap).map((skill) => `$${skill.name}`);
+		},
+		prepareMessage(text, renderContext) {
+			refreshSkillMap(pi, state);
+			return prepareSkillrefsUserMessageLoader({ state, text, ctx, renderContext });
+		},
+	});
+}
+
+function replayTreeState(state: SkillrefsRuntimeState, ctx: ExtensionContext): void {
+	const messages = sessionContextMessages(ctx);
+	state.skillrefsState = messages
+		? state.skillrefsState.replayForMessages(messages)
+		: SkillrefsBranchState.empty();
+	state.renderOccurrenceIndex = 0;
+}
+
 export default function piSkillrefs(pi: ExtensionAPI): void {
-	let skillMap = new Map<string, string>();
-	let skillItems: AutocompleteItem[] = [];
-	let wrapAutocomplete: WrapAutocomplete | undefined;
+	const state = createRuntimeState();
 	pi.registerMessageRenderer(SkillrefsCustomMessages.type, renderSkillrefsMessage);
 
 	registerPiFzfpCompatibility(pi, (nextWrapAutocomplete) => {
-		wrapAutocomplete = nextWrapAutocomplete;
+		state.wrapAutocomplete = nextWrapAutocomplete;
 	});
 
-	function refreshSkillMap(): void {
-		skillMap = collectDiscoveredSkills(pi.getCommands());
-		skillItems = buildSkillAutocompleteItems(skillMap);
-	}
-
 	pi.on("session_start", (_event, ctx) => {
-		refreshSkillMap();
+		stopSession(state);
+		refreshSkillMap(pi, state);
+		rebuildSkillrefsBranchState(state, ctx);
 		if (!ctx.hasUI) {
 			return;
 		}
 
-		installEditor(ctx, () => skillItems, wrapAutocomplete);
-		installSkillrefEditorStyling(ctx.ui, () => skillMap);
+		installSessionUi(ctx, state);
+		installUserMessageAugmentation(pi, state, ctx);
 	});
 
-	pi.on("resources_discover", refreshSkillMap);
+	pi.on("resources_discover", () => {
+		refreshSkillMap(pi, state);
+	});
+
+	pi.on("session_compact", (_event, ctx) => {
+		rebuildSkillrefsBranchState(state, ctx);
+		return undefined;
+	});
+
+	pi.on("session_tree", (_event, ctx) => {
+		replayTreeState(state, ctx);
+		return undefined;
+	});
+
+	pi.on("session_shutdown", () => {
+		stopSession(state);
+	});
 
 	pi.on("input", () => {
 		return { action: "continue" };
 	});
 
-	pi.on("context", (event) => {
+	pi.on("context", async (event, ctx) => {
+		refreshSkillMap(pi, state);
 		return {
-			messages: event.messages.map((message) => SkillrefsCustomMessages.restoreContent(message)),
+			messages: await buildProviderContextMessages(state, event.messages, ctx),
 		};
-	});
-
-	pi.on("before_agent_start", async (event, ctx) => {
-		const message = await buildInjectedSkillMessage(event.prompt, skillMap, ctx.sessionManager);
-		if (!message) {
-			return undefined;
-		}
-
-		const customMessage: SkillrefsCustomMessage = SkillrefsCustomMessages.create(
-			message.content,
-			message.skills,
-		);
-		return { message: customMessage };
 	});
 }

@@ -1,10 +1,12 @@
 import {
 	AuthStorage,
+	buildSessionContext,
 	createEventBus as createPiEventBus,
 	createExtensionRuntime,
 	createSyntheticSourceInfo,
 	estimateTokens,
 	ExtensionRunner,
+	InteractiveMode,
 	ModelRegistry,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
@@ -14,6 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import piSkillrefs from "../src/index.ts";
+import { buildInjectedSkillMessage } from "../src/injected-skill-message.ts";
+import { SkillrefsCustomMessages } from "../src/models/SkillrefsCustomMessage.ts";
 import {
 	styleKnownSkillrefsInRenderedLine,
 	styleRenderedEditorLines,
@@ -28,6 +32,8 @@ import {
 	createSessionManager,
 	createUserEntry,
 } from "./session-fixtures.mjs";
+
+const originalAddMessageToChat = Reflect.get(InteractiveMode.prototype, "addMessageToChat");
 
 function createEventBus() {
 	const handlers = new Map();
@@ -283,6 +289,9 @@ function createUiSessionContext() {
 			},
 			ui: {
 				theme: {
+					bg(color, text) {
+						return `<bg:${color}>${text}</bg:${color}>`;
+					},
 					bold(text) {
 						return `<bold>${text}</bold>`;
 					},
@@ -301,9 +310,74 @@ function createUiSessionContext() {
 	};
 }
 
-function getInjectedMessage(result) {
-	assert.ok(result?.message);
-	return result.message;
+function getInjectedProviderContent(result) {
+	const message = result?.messages?.[1];
+	assert.equal(message?.role, "user");
+	assert.equal(typeof message.content, "string");
+	return message.content;
+}
+
+function restoreInteractiveModePatch() {
+	Reflect.set(InteractiveMode.prototype, "addMessageToChat", originalAddMessageToChat);
+}
+
+function currentAddMessageToChat() {
+	const method = Reflect.get(InteractiveMode.prototype, "addMessageToChat");
+	assert.equal(typeof method, "function");
+	return function addMessageToChat(message, options) {
+		return method.call(this, message, options);
+	};
+}
+
+function createChatHost() {
+	const children = [];
+	return {
+		children,
+		host: {
+			chatContainer: {
+				addChild: children.push.bind(children),
+			},
+			getUserMessageText(message) {
+				return message.content;
+			},
+			keybindings: {
+				getKeys(keybinding) {
+					assert.equal(keybinding, "app.tools.expand");
+					return ["ctrl+o"];
+				},
+			},
+			toolOutputExpanded: false,
+			ui: {
+				requestRender() {},
+			},
+		},
+	};
+}
+
+function renderChildText(children, index) {
+	const child = children[index];
+	assert.ok(child);
+	return child.render(120).join("\n");
+}
+
+async function waitForRenderedChild(children, index, pattern) {
+	for (let attempt = 0; attempt < 25; attempt += 1) {
+		const text = renderChildText(children, index);
+		if (pattern.test(text)) {
+			return text;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+
+	return renderChildText(children, index);
+}
+
+function sessionContextFromEntries(entries, leafId) {
+	return buildSessionContext(entries, leafId).messages;
+}
+
+async function emitProviderContext(harness, messages, ctx = {}) {
+	return harness.emit("context", { messages }, ctx);
 }
 
 function applyAutocompleteCompletion(...args) {
@@ -376,6 +450,38 @@ async function runInstallEditorTest() {
 	assert.equal(typeof session.getInstalledFactory(), "function");
 }
 
+async function runUserMessageAugmentationUsesProviderBaselineTest() {
+	restoreInteractiveModePatch();
+	Reflect.set(InteractiveMode.prototype, "addMessageToChat", () => "ok");
+	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-chat-skill-"));
+	dirsToRemove.push(skillRoot);
+	const dayPath = join(skillRoot, "day.md");
+	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
+	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
+	const session = createUiSessionContext();
+	const { children, host } = createChatHost();
+
+	try {
+		await harness.emit("session_start", {}, session.ctx);
+		currentAddMessageToChat().call(host, { role: "user", content: "Use $day" });
+		const first = await waitForRenderedChild(children, 0, /Skill:/u);
+		assert.match(first, /Skill:/u);
+		assert.match(first, /<bg:customMessageBg>/u);
+		assert.doesNotMatch(first, /Skill reminder:/u);
+
+		await emitProviderContext(harness, [
+			{ role: "user", content: "Use $day", timestamp: 0 },
+		], session.ctx);
+		currentAddMessageToChat().call(host, { role: "user", content: "Use $day again" });
+		const second = await waitForRenderedChild(children, 1, /Skill reminder:/u);
+		assert.match(second, /Skill reminder:/u);
+		assert.match(second, /<bg:customMessageBg>/u);
+	} finally {
+		await harness.emit("session_shutdown");
+		restoreInteractiveModePatch();
+	}
+}
+
 async function runExtensionRunnerInjectionTest() {
 	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-runner-"));
 	dirsToRemove.push(skillRoot);
@@ -389,15 +495,13 @@ async function runExtensionRunnerInjectionTest() {
 	const runner = createRunnerHarness([createCommand("skill:code-ts", "skill", skillPath)]);
 
 	await runner.emitResourcesDiscover(process.cwd(), "startup");
-	const result = await runner.emitBeforeAgentStart("Use $code-ts", [], "base", {});
-	const message = result?.messages?.[0];
-	assert.equal(message?.customType, "pi-skillrefs");
-	assert.equal(message?.content, "$code-ts");
-	assert.match(message?.details.injectedContent ?? "", /Use strict types\./u);
-	assert.equal(message?.details.skills[0].path, realSkillPath);
-
-	const restored = await runner.emitContext([{ role: "custom", timestamp: 0, ...message }]);
-	assert.equal(restored[0].content, message.details.injectedContent);
+	const result = await runner.emitContext([
+		{ role: "user", content: "Use $code-ts", timestamp: 0 },
+	]);
+	const injected = result[1];
+	assert.equal(injected?.role, "user");
+	assert.match(injected?.content ?? "", /Use strict types\./u);
+	assert.match(injected?.content ?? "", new RegExp(realSkillPath.replaceAll("/", "\\/"), "u"));
 }
 
 async function runInjectionTest() {
@@ -421,58 +525,50 @@ async function runInjectionTest() {
 		{},
 	);
 	assert.deepEqual(inputResult, { action: "continue" });
-	const agentStartResult = await harness.emit(
-		"before_agent_start",
-		{ prompt: "Hey nice $day and $night", images: [], systemPrompt: "base" },
-		{},
-	);
+	const contextResult = await emitProviderContext(harness, [
+		{ role: "user", content: "Hey nice $day and $night", timestamp: 0 },
+	]);
 	const dayContent =
 		`<injected_skill ref="$day" path="${dayRealPath}">\nYou should tell the user that it's daytime.\n</injected_skill>`;
 	const nightContent =
 		`<injected_skill ref="$night" path="${nightRealPath}">\nYou should tell the user that it's bedtime.\n</injected_skill>`;
 	const content = `<environment_context>\n${dayContent}\n\n${nightContent}\n</environment_context>`;
-	const message = getInjectedMessage(agentStartResult);
-	assert.deepEqual(message, {
-		customType: "pi-skillrefs",
-		content: "$day, $night",
-		display: true,
-		details: {
-			injectedContent: content,
-			skills: [
-				{
-					ref: "$day",
-					label: "$day",
-					path: dayRealPath,
-					mode: "full",
-					tokenCount: estimateTokens({
-						role: "custom",
-						customType: "pi-skillrefs",
-						content: dayContent,
-						display: true,
-						timestamp: 0,
-					}),
-				},
-				{
-					ref: "$night",
-					label: "$night",
-					path: nightRealPath,
-					mode: "full",
-					tokenCount: estimateTokens({
-						role: "custom",
-						customType: "pi-skillrefs",
-						content: nightContent,
-						display: true,
-						timestamp: 0,
-					}),
-				},
-			],
-		},
-	});
+	assert.equal(contextResult.messages[0].content, "Hey nice $day and $night");
+	assert.equal(getInjectedProviderContent(contextResult), content);
 
-	const contextResult = await harness.emit("context", {
-		messages: [{ role: "custom", timestamp: 0, ...message }],
-	});
-	assert.equal(contextResult.messages[0].content, content);
+	const directMessage = await buildInjectedSkillMessage(
+		"Hey nice $day and $night",
+		new Map([["day", dayPath], ["night", nightPath]]),
+		{ fullSkillRefs: new Set() },
+	);
+	assert.deepEqual(directMessage?.skills, [
+		{
+			ref: "$day",
+			label: "$day",
+			path: dayRealPath,
+			mode: "full",
+			tokenCount: estimateTokens({
+				role: "custom",
+				customType: "pi-skillrefs",
+				content: dayContent,
+				display: true,
+				timestamp: 0,
+			}),
+		},
+		{
+			ref: "$night",
+			label: "$night",
+			path: nightRealPath,
+			mode: "full",
+			tokenCount: estimateTokens({
+				role: "custom",
+				customType: "pi-skillrefs",
+				content: nightContent,
+				display: true,
+				timestamp: 0,
+			}),
+		},
+	]);
 }
 
 async function runResolvedSkillNameTest() {
@@ -488,79 +584,83 @@ async function runResolvedSkillNameTest() {
 	const harness = createHarness([createCommand("skill:day", "skill", skillPath)]);
 	await harness.emit("resources_discover");
 	const realSkillPath = await realpath(skillPath);
-	const agentStartResult = await harness.emit(
-		"before_agent_start",
-		{ prompt: "Use $day", images: [], systemPrompt: "base" },
-		{},
+	const directMessage = await buildInjectedSkillMessage(
+		"Use $day",
+		new Map([["day", skillPath]]),
+		{ fullSkillRefs: new Set() },
 	);
 
-	const message = getInjectedMessage(agentStartResult);
-	assert.equal(message.details.skills[0].label, "Day Skill");
-	assert.equal(message.content, "$day");
+	assert.equal(directMessage?.skills[0]?.label, "Day Skill");
 	assert.equal(
-		message.details.injectedContent,
+		directMessage
+			? SkillrefsCustomMessages.create(directMessage.content, directMessage.skills).content
+			: undefined,
+		"$day",
+	);
+	assert.equal(
+		directMessage?.content
+			? SkillrefsCustomMessages.create(directMessage.content, directMessage.skills)
+				.details.injectedContent
+			: undefined,
 		`<environment_context>\n<injected_skill ref="$day" path="${realSkillPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
 	);
 }
 
 async function runReminderInjectionWhenSkillStillInContextTest() {
 	const { dayRealPath, fullContent, harness } = await createDaySkillHarness();
+	const entries = [
+		createUserEntry("u1", null, "Use $day"),
+		createCustomSkillEntry({
+			id: "s1",
+			parentId: "u1",
+			content: `<environment_context>\n${fullContent}\n</environment_context>`,
+			details: {
+				skills: [{ ref: "$day", mode: "full" }],
+			},
+		}),
+		createCompactionEntry("c1", "s1", "s1"),
+		createUserEntry("u2", "c1", "Use $day again"),
+	];
 	const ctx = {
-		sessionManager: createSessionManager([
-			createUserEntry("u1", null, "Use $day"),
-			createCustomSkillEntry({
-				id: "s1",
-				parentId: "u1",
-				content: `<environment_context>\n${fullContent}\n</environment_context>`,
-				details: {
-					skills: [{ ref: "$day", mode: "full" }],
-				},
-			}),
-			createCompactionEntry("c1", "s1", "s1"),
-			createUserEntry("u2", "c1", "Use $day again"),
-		], "u2"),
+		sessionManager: createSessionManager(entries, "u2"),
 	};
 
-	const result = await harness.emit(
-		"before_agent_start",
-		{ prompt: "Use $day again", images: [], systemPrompt: "base" },
+	const result = await emitProviderContext(
+		harness,
+		sessionContextFromEntries(entries, "u2"),
 		ctx,
 	);
-	const message = getInjectedMessage(result);
 
-	assert.equal(message.content, "$day");
 	assert.equal(
-		message.details.injectedContent,
+		result.messages.at(-1)?.content,
 		`<environment_context>\n<injected_skill ref="$day" path="${dayRealPath}">Reminder to use $day</injected_skill>\n</environment_context>`,
 	);
-	assert.equal(message.details.skills[0].label, "Day Skill");
-	assert.equal(message.details.skills[0].path, dayRealPath);
-	assert.equal(message.details.skills[0].mode, "reminder");
 }
 
 async function runFullInjectionWhenSkillExistsOnlyOnInactiveBranchTest() {
 	const { fullContent, harness } = await createDaySkillHarness();
+	const entries = [
+		createUserEntry("u1", null, "Root"),
+		createCustomSkillEntry({ id: "s1", parentId: "u1", content: fullContent }),
+		createUserEntry("u2", "u1", "Other branch"),
+	];
 	const ctx = {
-		sessionManager: createSessionManager([
-			createUserEntry("u1", null, "Root"),
-			createCustomSkillEntry({ id: "s1", parentId: "u1", content: fullContent }),
-			createUserEntry("u2", "u1", "Other branch"),
-		], "u2"),
+		sessionManager: createSessionManager(entries, "u2"),
 	};
 
-	const result = await harness.emit(
-		"before_agent_start",
-		{ prompt: "Use $day", images: [], systemPrompt: "base" },
+	const result = await emitProviderContext(
+		harness,
+		[
+			...sessionContextFromEntries(entries, "u2"),
+			{ role: "user", content: "Use $day", timestamp: 0 },
+		],
 		ctx,
 	);
-	const message = getInjectedMessage(result);
 
-	assert.equal(message.content, "$day");
 	assert.equal(
-		message.details.injectedContent,
+		result.messages.at(-1)?.content,
 		`<environment_context>\n${fullContent}\n</environment_context>`,
 	);
-	assert.equal(message.details.skills[0].mode, "full");
 }
 
 async function runResolvedPathInjectionTest() {
@@ -573,19 +673,20 @@ async function runResolvedPathInjectionTest() {
 	const resolvedPath = await realpath(linkPath);
 	const harness = createHarness([createCommand("skill:day", "skill", linkPath)]);
 	await harness.emit("resources_discover");
-	const result = await harness.emit(
-		"before_agent_start",
-		{ prompt: "Use $day", images: [], systemPrompt: "base" },
-		{},
+	const directMessage = await buildInjectedSkillMessage(
+		"Use $day",
+		new Map([["day", linkPath]]),
+		{ fullSkillRefs: new Set() },
 	);
-	const message = getInjectedMessage(result);
 
-	assert.equal(message.content, "$day");
 	assert.equal(
-		message.details.injectedContent,
+		directMessage?.content
+			? SkillrefsCustomMessages.create(directMessage.content, directMessage.skills)
+				.details.injectedContent
+			: undefined,
 		`<environment_context>\n<injected_skill ref="$day" path="${resolvedPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
 	);
-	assert.equal(message.details.skills[0].path, resolvedPath);
+	assert.equal(directMessage?.skills[0]?.path, resolvedPath);
 }
 
 async function runCompositionTest() {
@@ -671,11 +772,14 @@ function runRenderedEditorStylingTest() {
 const dirsToRemove = [];
 
 afterEach(async () => {
+	restoreInteractiveModePatch();
 	await Promise.all(dirsToRemove.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 void describe("pi-skillrefs", () => {
 	void test("installs a custom editor on session start", runInstallEditorTest);
+	void test("renders user-message skill refs with provider branch baseline",
+		runUserMessageAugmentationUsesProviderBaselineTest);
 	void test("fuzzy matches skill names across hyphen boundaries", runFuzzyAutocompleteTest);
 	void test("keeps user text unchanged and injects visible skill context", runInjectionTest);
 	void test("injects and restores skill context through Pi ExtensionRunner",

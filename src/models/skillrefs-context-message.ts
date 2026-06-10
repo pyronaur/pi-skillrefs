@@ -1,108 +1,20 @@
-import { type Static, Type } from "typebox";
-import { TEMPLATE } from "../config/templates.js";
-
-export type SkillInjectionMode = Static<typeof SkillInjectionMode>;
-
-const ENVIRONMENT_CONTEXT_PATTERN =
-	/^\s*<environment_context>\s*([\s\S]*?)\s*<\/environment_context>\s*$/u;
-const INJECTED_SKILL_PATTERN = /<injected_skill\b([^>]*)>([\s\S]*?)<\/injected_skill>/gu;
-const ATTRIBUTE_PATTERN = /\b([a-z_]+)="([^"]*)"/gu;
-
-function escapeXmlAttribute(text: string): string {
-	return text
-		.replaceAll("&", "&amp;")
-		.replaceAll("\"", "&quot;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll("'", "&apos;");
-}
-
-function readAttributes(raw: string): Record<string, string> {
-	const attrs: Record<string, string> = {};
-	for (const match of raw.matchAll(ATTRIBUTE_PATTERN)) {
-		const [, key, value] = match;
-		if (!key) {
-			continue;
-		}
-
-		attrs[key] = (value ?? "")
-			.replaceAll("&quot;", "\"")
-			.replaceAll("&lt;", "<")
-			.replaceAll("&gt;", ">")
-			.replaceAll("&apos;", "'")
-			.replaceAll("&amp;", "&");
-	}
-
-	return attrs;
-}
-
-function trimBody(body: string): string {
-	return body.replaceAll("\r\n", "\n").replace(/^\n+|\n+$/gu, "");
-}
-
-type SkillrefsContextBlock = {
-	ref: string;
-	body: string;
-	path?: string;
-	mode: SkillInjectionMode;
-};
-
-function renderSkill(skill: SkillrefsContextBlock): string {
-	if (skill.mode === "reminder" && skill.path) {
-		return TEMPLATE.injectedSkillReminder(
-			escapeXmlAttribute(skill.ref),
-			escapeXmlAttribute(skill.path),
-		);
-	}
-
-	return TEMPLATE.injectedSkill(
-		escapeXmlAttribute(skill.ref),
-		escapeXmlAttribute(skill.path ?? ""),
-		skill.body,
-	);
-}
-
-function inferSkillInjectionMode(
-	ref: string,
-	body: string,
-	path: string | undefined,
-): SkillInjectionMode {
-	if (path === undefined) {
-		return "full";
-	}
-	if (body !== TEMPLATE.skillReminder(ref)) {
-		return "full";
-	}
-
-	return "reminder";
-}
-
-function parseSkillBlock(rawAttrs: string, rawBody: string): SkillrefsContextBlock | null {
-	const attrs = readAttributes(rawAttrs);
-	const ref = attrs.ref;
-	if (!ref) {
-		return null;
-	}
-
-	const body = trimBody(rawBody);
-	return {
-		ref,
-		body,
-		mode: inferSkillInjectionMode(ref, body, attrs.path),
-		...(attrs.path === undefined ? {} : { path: attrs.path }),
-	};
-}
+import {
+	type SkillInjectionMode as SkillInjectionModeType,
+	type SkillrefsContextBlock,
+	skillrefsRefInjection,
+} from "./SkillrefsRefInjection.js";
+export type SkillInjectionMode = SkillInjectionModeType;
 
 export class SkillrefsContextMessage {
 	readonly skills: SkillrefsContextBlock[];
+	private readonly content: string;
+	private readonly skillContent: string[];
 
 	constructor(skills: SkillrefsContextBlock[]) {
-		this.skills = skills.map((skill) => ({
-			ref: skill.ref,
-			body: trimBody(skill.body),
-			mode: skill.mode,
-			...(skill.path === undefined ? {} : { path: skill.path }),
-		}));
+		const message = skillrefsRefInjection.context.create(skills);
+		this.skills = message.blocks;
+		this.skillContent = message.toBlockContent();
+		this.content = message.toString();
 	}
 
 	static create(skills: SkillrefsContextBlock[]): SkillrefsContextMessage {
@@ -110,44 +22,15 @@ export class SkillrefsContextMessage {
 	}
 
 	static parse(content: unknown): SkillrefsContextMessage | null {
-		if (typeof content !== "string") {
-			return null;
-		}
-
-		const match = ENVIRONMENT_CONTEXT_PATTERN.exec(content);
-		if (!match) {
-			return null;
-		}
-
-		const [, body = ""] = match;
-		const skills: SkillrefsContextBlock[] = [];
-		for (const blockMatch of body.matchAll(INJECTED_SKILL_PATTERN)) {
-			const [, rawAttrs = "", rawBody = ""] = blockMatch;
-			const skill = parseSkillBlock(rawAttrs, rawBody);
-			if (!skill) {
-				continue;
-			}
-
-			skills.push(skill);
-		}
-
-		if (skills.length === 0) {
-			return null;
-		}
-
-		return new SkillrefsContextMessage(skills);
+		const message = skillrefsRefInjection.context.parse(content);
+		return message ? new SkillrefsContextMessage(message.blocks) : null;
 	}
 
 	toSkillContent(): string[] {
-		return this.skills.map((skill) => renderSkill(skill));
+		return this.skillContent;
 	}
 
 	toString(): string {
-		return TEMPLATE.environmentContext(this.toSkillContent().join("\n\n"));
+		return this.content;
 	}
 }
-
-export const SkillInjectionMode = Type.Union([
-	Type.Literal("full"),
-	Type.Literal("reminder"),
-]);

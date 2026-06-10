@@ -1,7 +1,5 @@
 import {
-	buildSessionContext,
 	estimateTokens,
-	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -20,14 +18,12 @@ type InjectedSkillMessage = {
 	content: string;
 	skills: SkillrefsMessageSkill[];
 };
+type BuildInjectedSkillMessageOptions = {
+	fullSkillRefs: ReadonlySet<string>;
+};
 
 const H1_PATTERN = /^#\s+(.+?)\s*$/m;
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u;
-
-type SkillRefsSessionManager = {
-	getEntries(): SessionEntry[];
-	getLeafId(): string | null;
-};
 
 type InjectedSkillBlock = SkillrefsMessageSkill & { body: string };
 
@@ -43,24 +39,6 @@ function resolveSkillLabel(skill: MentionedSkill, content: string): string {
 
 function stripSkillFrontmatter(content: string): string {
 	return content.replace(FRONTMATTER_PATTERN, "");
-}
-
-function collectFullSkillRefs(sessionManager?: SkillRefsSessionManager): Set<string> {
-	if (!sessionManager) {
-		return new Set();
-	}
-
-	const entries = sessionManager.getEntries();
-	const leafId = sessionManager.getLeafId();
-	const effectiveContextMessagesSnapshot = buildSessionContext(entries, leafId).messages;
-	const refs = new Set<string>();
-	for (const message of effectiveContextMessagesSnapshot) {
-		for (const ref of SkillrefsCustomMessages.fullRefs(message)) {
-			refs.add(ref);
-		}
-	}
-
-	return refs;
 }
 
 async function readInjectedSkillBlock(
@@ -98,17 +76,18 @@ async function readInjectedSkillBlock(
 export async function buildInjectedSkillMessage(
 	text: string,
 	skillMap: Map<string, string>,
-	sessionManager?: SkillRefsSessionManager,
+	options: BuildInjectedSkillMessageOptions,
 ): Promise<InjectedSkillMessage | undefined> {
 	const skills = collectMentionedSkills(text, skillMap);
 	if (skills.length === 0) {
 		return undefined;
 	}
-	const fullSkillRefs = collectFullSkillRefs(sessionManager);
 
 	const blocks = (await Promise.all(
 		skills.map((skill) => {
-			const mode: SkillInjectionMode = fullSkillRefs.has(`$${skill.name}`) ? "reminder" : "full";
+			const mode: SkillInjectionMode = options.fullSkillRefs.has(`$${skill.name}`)
+				? "reminder"
+				: "full";
 			return readInjectedSkillBlock(skill, mode);
 		}),
 	)).filter((block) => block !== undefined);
