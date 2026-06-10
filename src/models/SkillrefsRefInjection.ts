@@ -219,7 +219,8 @@ export const skillrefsRefInjection: SkillrefsDomain = createRefInjectionDomain({
 		fullRefs: skillrefsFullRefs,
 	},
 	contextMessage: {
-		blockTag: "injected_skill",
+		blockTag: "skill",
+		blockTagAliases: ["injected_skill"],
 		environmentContext: (content) => TEMPLATE.environmentContext(content),
 		renderBlock: renderSkill,
 		blockFromAttributes(input): SkillrefsContextBlock | undefined {

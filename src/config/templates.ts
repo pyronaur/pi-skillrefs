@@ -3,13 +3,10 @@ export const TEMPLATE = {
 		return ["<environment_context>", body, "</environment_context>"].join("\n");
 	},
 	injectedSkill(ref: string, path: string, body: string): string {
-		return [`<injected_skill ref="${ref}" path="${path}">`, body, "</injected_skill>"]
-			.join("\n");
+		return [`<skill ref="${ref}" path="${path}">`, body, "</skill>"].join("\n");
 	},
 	injectedSkillReminder(ref: string, path: string): string {
-		return `<injected_skill ref="${ref}" path="${path}">${
-			TEMPLATE.skillReminder(ref)
-		}</injected_skill>`;
+		return `<skill ref="${ref}" path="${path}">${TEMPLATE.skillReminder(ref)}</skill>`;
 	},
 	skillReminder(ref: string): string {
 		return `Reminder to use ${ref}`;

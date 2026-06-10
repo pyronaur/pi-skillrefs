@@ -10,6 +10,7 @@ export type RefInjectionContextBlock = {
 
 export type RefInjectionContextMessageConfig<TBlock extends RefInjectionContextBlock> = {
 	blockTag: string;
+	blockTagAliases?: readonly string[];
 	environmentContext(content: string): string;
 	renderBlock(block: TBlock, escapeAttribute: (text: string) => string): string;
 	blockFromAttributes(input: {
@@ -81,10 +82,12 @@ export class RefInjectionContextMessage<TBlock extends RefInjectionContextBlock>
 
 		const [, body = ""] = match;
 		const blocks: TBlock[] = [];
-		const pattern = new RegExp(`<${config.blockTag}\\b([^>]*)>([\\s\\S]*?)<\\/${config.blockTag}>`,
-			"gu");
+		const blockTags = [config.blockTag, ...(config.blockTagAliases ?? [])]
+			.map((tag) => tag.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+			.join("|");
+		const pattern = new RegExp(`<(${blockTags})\\b([^>]*)>([\\s\\S]*?)<\\/\\1>`, "gu");
 		for (const blockMatch of body.matchAll(pattern)) {
-			const [, rawAttrs = "", rawBody = ""] = blockMatch;
+			const [, , rawAttrs = "", rawBody = ""] = blockMatch;
 			const block = config.blockFromAttributes({
 				attributes: readAttributes(rawAttrs),
 				body: trimBody(rawBody),

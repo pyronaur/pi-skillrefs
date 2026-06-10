@@ -55,7 +55,7 @@ function injectedSkillBlocksAfterPrompt(turn, prompt, ref) {
 	const nextUser = turn.slice(promptIndex + 1).find((message) => message.role === "user");
 	assert.ok(nextUser);
 	const pattern = new RegExp(
-		`<injected_skill ref="\\${ref}" path="[^"]*">([\\s\\S]*?)<\\/injected_skill>`,
+		`<skill ref="\\${ref}" path="[^"]*">([\\s\\S]*?)<\\/skill>`,
 		"gu",
 	);
 	return [...nextUser.text.matchAll(pattern)].map((match) => match[1] ?? "");

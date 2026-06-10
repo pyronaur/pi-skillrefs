@@ -267,8 +267,7 @@ async function createDaySkillHarness() {
 	const dayRealPath = await realpath(dayPath);
 	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
 	await harness.emit("resources_discover");
-	const fullContent =
-		`<injected_skill ref="$day" path="${dayRealPath}">\n# Day Skill\n\nRest.\n</injected_skill>`;
+	const fullContent = `<skill ref="$day" path="${dayRealPath}">\n# Day Skill\n\nRest.\n</skill>`;
 
 	return { dayRealPath, fullContent, harness };
 }
@@ -529,9 +528,9 @@ async function runInjectionTest() {
 		{ role: "user", content: "Hey nice $day and $night", timestamp: 0 },
 	]);
 	const dayContent =
-		`<injected_skill ref="$day" path="${dayRealPath}">\nYou should tell the user that it's daytime.\n</injected_skill>`;
+		`<skill ref="$day" path="${dayRealPath}">\nYou should tell the user that it's daytime.\n</skill>`;
 	const nightContent =
-		`<injected_skill ref="$night" path="${nightRealPath}">\nYou should tell the user that it's bedtime.\n</injected_skill>`;
+		`<skill ref="$night" path="${nightRealPath}">\nYou should tell the user that it's bedtime.\n</skill>`;
 	const content = `<environment_context>\n${dayContent}\n\n${nightContent}\n</environment_context>`;
 	assert.equal(contextResult.messages[0].content, "Hey nice $day and $night");
 	assert.equal(getInjectedProviderContent(contextResult), content);
@@ -602,7 +601,7 @@ async function runResolvedSkillNameTest() {
 			? SkillrefsCustomMessages.create(directMessage.content, directMessage.skills)
 				.details.injectedContent
 			: undefined,
-		`<environment_context>\n<injected_skill ref="$day" path="${realSkillPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
+		`<environment_context>\n<skill ref="$day" path="${realSkillPath}">\n# Day Skill\n\nRest.\n</skill>\n</environment_context>`,
 	);
 }
 
@@ -633,7 +632,7 @@ async function runReminderInjectionWhenSkillStillInContextTest() {
 
 	assert.equal(
 		result.messages.at(-1)?.content,
-		`<environment_context>\n<injected_skill ref="$day" path="${dayRealPath}">Reminder to use $day</injected_skill>\n</environment_context>`,
+		`<environment_context>\n<skill ref="$day" path="${dayRealPath}">Reminder to use $day</skill>\n</environment_context>`,
 	);
 }
 
@@ -684,7 +683,7 @@ async function runResolvedPathInjectionTest() {
 			? SkillrefsCustomMessages.create(directMessage.content, directMessage.skills)
 				.details.injectedContent
 			: undefined,
-		`<environment_context>\n<injected_skill ref="$day" path="${resolvedPath}">\n# Day Skill\n\nRest.\n</injected_skill>\n</environment_context>`,
+		`<environment_context>\n<skill ref="$day" path="${resolvedPath}">\n# Day Skill\n\nRest.\n</skill>\n</environment_context>`,
 	);
 	assert.equal(directMessage?.skills[0]?.path, resolvedPath);
 }
