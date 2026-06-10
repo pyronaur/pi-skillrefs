@@ -1,3 +1,4 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { SkillrefsContextMessage } from "../src/models/skillrefs-context-message.ts";
@@ -14,9 +15,13 @@ function createTheme() {
 	};
 }
 
-function renderSummary(message) {
+function renderSummaryRaw(message, width = 80) {
 	const component = renderSkillrefsMessage(message, { expanded: false }, createTheme());
-	return component.render(80).map((line) => line.trim()).filter(Boolean);
+	return component.render(width).filter((line) => line.trim());
+}
+
+function renderSummary(message, width = 80) {
+	return renderSummaryRaw(message, width).map((line) => line.trim());
 }
 
 function renderExpanded(message) {
@@ -50,8 +55,8 @@ void describe("render-skillrefs-message", () => {
 		assert.equal(parsed?.skills[0]?.body, "Legacy body.");
 	});
 
-	void test("renders collapsed skill summaries with token counts", () => {
-		const rendered = renderSummary({
+	void test("renders collapsed skill refs with token counts", () => {
+		const raw = renderSummaryRaw({
 			role: "custom",
 			customType: "pi-skillrefs",
 			content: "$day",
@@ -63,11 +68,19 @@ void describe("render-skillrefs-message", () => {
 				skills: [skill({ tokenCount: 8230 })],
 			},
 		});
+		const rendered = raw.join("\n");
+		const header = raw[0];
+		assert.ok(header);
 
-		assert.deepEqual(rendered, ["Skill: Day Skill (8.23k tokens)", "(Ctrl+O to expand)"]);
+		assert.equal(visibleWidth(header), 80);
+		assert.match(header, /\(Ctrl\+O to expand\)/u);
+		assert.match(rendered, /\$day/u);
+		assert.match(rendered, /8\.23k/u);
+		assert.doesNotMatch(rendered, /Day Skill/u);
+		assert.doesNotMatch(rendered, /Skill:/u);
 	});
 
-	void test("renders reminder titles for reminder injections", () => {
+	void test("renders reminder injections without mode labels", () => {
 		const rendered = renderSummary({
 			role: "custom",
 			customType: "pi-skillrefs",
@@ -79,16 +92,19 @@ void describe("render-skillrefs-message", () => {
 					`<environment_context>\n<skill ref="$day" path="/tmp/day.md">Reminder to use $day</skill>\n</environment_context>`,
 				skills: [skill({ mode: "reminder", tokenCount: 36 })],
 			},
-		});
+		}).join("\n");
 
-		assert.deepEqual(rendered, ["Skill reminder: Day Skill (36 tokens)", "(Ctrl+O to expand)"]);
+		assert.match(rendered, /\$day/u);
+		assert.match(rendered, /\b36\b/u);
+		assert.doesNotMatch(rendered, /Skill reminder:/u);
+		assert.doesNotMatch(rendered, /Day Skill/u);
 	});
 
-	void test("renders multiple skills in one collapsed summary", () => {
+	void test("renders all collapsed skill refs across wrapped rows", () => {
 		const rendered = renderSummary({
 			role: "custom",
 			customType: "pi-skillrefs",
-			content: "$day, $night",
+			content: "$day, $night, $code-testing, $improve-codebase-architecture",
 			display: true,
 			timestamp: Date.now(),
 			details: {
@@ -101,15 +117,29 @@ void describe("render-skillrefs-message", () => {
 						mode: "full",
 						tokenCount: 20,
 					},
+					{
+						ref: "$code-testing",
+						label: "Test Rules",
+						path: "/tmp/code-testing.md",
+						mode: "full",
+						tokenCount: 1160,
+					},
+					{
+						ref: "$improve-codebase-architecture",
+						label: "Improve Architecture",
+						path: "/tmp/improve.md",
+						mode: "full",
+						tokenCount: 1160,
+					},
 				],
 			},
-		});
+		}, 72).join("\n");
 
-		assert.deepEqual(rendered, [
-			"Skill: Day Skill (10 tokens)",
-			"Skill: Night Skill (20 tokens)",
-			"(Ctrl+O to expand)",
-		]);
+		assert.match(rendered, /\$day/u);
+		assert.match(rendered, /\$night/u);
+		assert.match(rendered, /\$code-testing/u);
+		assert.match(rendered, /\$improve-codebase-architecture/u);
+		assert.doesNotMatch(rendered, /Improve Architecture/u);
 	});
 
 	void test("renders injected content when expanded", () => {
@@ -127,11 +157,11 @@ void describe("render-skillrefs-message", () => {
 			},
 		});
 
-		assert.deepEqual(rendered, [
-			"Skill reminder: Day Skill (36 tokens)",
-			"<environment_context>",
-			`<skill ref="$day" path="/tmp/day.md">Reminder to use $day</skill>`,
-			"</environment_context>",
-		]);
+		const text = rendered.join("\n");
+		assert.match(text, /\$day/u);
+		assert.match(text, /\b36\b/u);
+		assert.match(text, /<environment_context>/u);
+		assert.match(text, /<skill ref="\$day" path="\/tmp\/day\.md">/u);
+		assert.doesNotMatch(text, /Day Skill/u);
 	});
 });

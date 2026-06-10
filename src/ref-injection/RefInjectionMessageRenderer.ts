@@ -1,5 +1,11 @@
 import type { MessageRenderer } from "@earendil-works/pi-coding-agent";
-import { Box, Text } from "@earendil-works/pi-tui";
+import {
+	Box,
+	type Component,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import type { RefInjectionItem } from "./RefInjectionCustomMessage.js";
 
 type RendererTheme = Parameters<MessageRenderer>[2];
@@ -10,7 +16,7 @@ type RenderableRefInjectionMessage<TDetails> = {
 };
 
 export type RefInjectionMessageRendererConfig<TItem extends RefInjectionItem> = {
-	visibleItems: number;
+	summaryTitle: string;
 	getExpandKey(): string;
 	items(details: unknown): TItem[];
 	expandedContent(content: string, details: unknown): string;
@@ -40,6 +46,22 @@ type ExpandedTextInput<TItem extends RefInjectionItem> = {
 	content: string;
 	items: TItem[];
 	theme: RendererTheme | undefined;
+	width: number;
+};
+
+type SummaryRowsInput<TItem extends RefInjectionItem> = {
+	config: RefInjectionMessageRendererConfig<TItem>;
+	items: TItem[];
+	theme: RendererTheme | undefined;
+	width: number;
+};
+
+type RefInjectionSummaryComponentInput<TItem extends RefInjectionItem> = {
+	config: RefInjectionMessageRendererConfig<TItem>;
+	content: string;
+	items: TItem[];
+	expanded: boolean;
+	theme: RendererTheme | undefined;
 };
 
 function getTextContent(content: string | RichTextBlock[]): string {
@@ -61,35 +83,86 @@ function formatTokenCount(tokens: number): string {
 	return `${(tokens / 1000).toFixed(2).replace(/\.0+$/u, "").replace(/(\.\d*[1-9])0$/u, "$1")}k`;
 }
 
-function collapsedText<TItem extends RefInjectionItem>(
-	config: RefInjectionMessageRendererConfig<TItem>,
-	items: TItem[],
-	theme: RendererTheme | undefined,
-): string {
-	const expandHint = config.dimText(config.expandHint(config.getExpandKey()), theme);
-	if (items.length === 0) {
-		return expandHint;
+function headerLine(left: string, right: string, width: number): string {
+	const available = Math.max(1, width);
+	const leftWidth = visibleWidth(left);
+	const rightWidth = visibleWidth(right);
+	const gap = available - leftWidth - rightWidth;
+	if (gap > 0) {
+		return left + " ".repeat(gap) + right;
 	}
 
-	const visibleItems = items.slice(0, config.visibleItems);
-	return [
-		...visibleItems.map((item) => config.itemLine({ item, formatTokenCount, theme })),
-		expandHint,
-	].join("\n");
+	const leftMaxWidth = available - rightWidth - 1;
+	if (leftMaxWidth > 0) {
+		return truncateToWidth(left, leftMaxWidth, "") + " " + right;
+	}
+
+	return truncateToWidth(right, available, "");
 }
 
-function expandedText<TItem extends RefInjectionItem>(input: ExpandedTextInput<TItem>): string {
+function summaryRows<TItem extends RefInjectionItem>(
+	input: SummaryRowsInput<TItem>,
+): string[] {
+	const title = input.config.dimText(input.config.summaryTitle, input.theme);
+	const hint = input.config.dimText(input.config.expandHint(input.config.getExpandKey()),
+		input.theme);
+	const header = headerLine(title, hint, input.width);
+	const items = input.items.map((item) =>
+		input.config.itemLine({ item, formatTokenCount, theme: input.theme })
+	).join(" ");
+	if (items.length === 0) {
+		return [header];
+	}
+
+	return [header, ...wrapTextWithAnsi(items, input.width)];
+}
+
+function expandedText<TItem extends RefInjectionItem>(input: ExpandedTextInput<TItem>): string[] {
 	const renderedContent = input.config.messageText(input.content, input.theme);
 	if (input.items.length === 0) {
-		return renderedContent;
+		return wrapTextWithAnsi(renderedContent, input.width);
 	}
 
 	return input.config.expandedSummary({
-		itemLines: input.items.map((item) =>
-			input.config.itemLine({ item, formatTokenCount, theme: input.theme })
-		),
-		content: renderedContent,
-	});
+		itemLines: summaryRows(input),
+		content: wrapTextWithAnsi(renderedContent, input.width).join("\n"),
+	}).split("\n");
+}
+
+class RefInjectionSummaryComponent<TItem extends RefInjectionItem> implements Component {
+	private readonly config: RefInjectionMessageRendererConfig<TItem>;
+	private readonly content: string;
+	private readonly items: TItem[];
+	private readonly expanded: boolean;
+	private readonly theme: RendererTheme | undefined;
+
+	constructor(input: RefInjectionSummaryComponentInput<TItem>) {
+		this.config = input.config;
+		this.content = input.content;
+		this.items = input.items;
+		this.expanded = input.expanded;
+		this.theme = input.theme;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const renderWidth = Math.max(1, width);
+		return this.expanded
+			? expandedText({
+				config: this.config,
+				content: this.content,
+				items: this.items,
+				theme: this.theme,
+				width: renderWidth,
+			})
+			: summaryRows({
+				config: this.config,
+				items: this.items,
+				theme: this.theme,
+				width: renderWidth,
+			});
+	}
 }
 
 export function createRefInjectionMessageRenderer<
@@ -106,10 +179,7 @@ export function createRefInjectionMessageRenderer<
 		const box = new Box(1, 1, (text) => config.boxBackground(text, theme));
 		const content = config.expandedContent(getTextContent(message.content), message.details);
 		const items = config.items(message.details);
-		const text = expanded
-			? expandedText({ config, content, items, theme })
-			: collapsedText(config, items, theme);
-		box.addChild(new Text(text, 0, 0));
+		box.addChild(new RefInjectionSummaryComponent({ config, content, items, expanded, theme }));
 		return box;
 	}
 

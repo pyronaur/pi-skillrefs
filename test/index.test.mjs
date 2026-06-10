@@ -404,25 +404,24 @@ async function runUserMessageAugmentationUsesProviderBaselineTest() {
 	const skillRoot = await mkdtemp(join(tmpdir(), "pi-skillrefs-chat-skill-"));
 	dirsToRemove.push(skillRoot);
 	const dayPath = join(skillRoot, "day.md");
-	await writeFile(dayPath, "# Day Skill\n\nRest.\n", "utf8");
+	await writeFile(dayPath, "# Day Skill\n\nFULL_SKILL_BODY_SENTINEL\n", "utf8");
 	const harness = createHarness([createCommand("skill:day", "skill", dayPath)]);
 	const session = createUiSessionContext();
-	const { children, host } = createChatHost();
+	const { children, host } = createChatHost({ expanded: true });
 
 	try {
 		await harness.emit("session_start", {}, session.ctx);
 		currentAddMessageToChat().call(host, { role: "user", content: "Use $day" });
-		const first = await waitForRenderedChild(children, 0, /Skill:/u);
-		assert.match(first, /Skill:/u);
+		const first = await waitForRenderedChild(children, 0, /FULL_SKILL_BODY_SENTINEL/u);
+		assert.match(first, /\$day/u);
 		assert.match(first, /<bg:customMessageBg>/u);
-		assert.doesNotMatch(first, /Skill reminder:/u);
 
 		await emitProviderContext(harness, [
 			{ role: "user", content: "Use $day", timestamp: 0 },
 		], session.ctx);
 		currentAddMessageToChat().call(host, { role: "user", content: "Use $day again" });
-		const second = await waitForRenderedChild(children, 1, /Skill reminder:/u);
-		assert.match(second, /Skill reminder:/u);
+		const second = await waitForRenderedChild(children, 1, /\$day/u);
+		assert.doesNotMatch(second, /FULL_SKILL_BODY_SENTINEL/u);
 		assert.match(second, /<bg:customMessageBg>/u);
 	} finally {
 		await harness.emit("session_shutdown");

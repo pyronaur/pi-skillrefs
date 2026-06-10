@@ -3,10 +3,8 @@ import { keyText } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 import {
-	SKILL_REMINDER_SUMMARY_TITLE,
-	SKILL_SUMMARY_TITLE,
-	SKILLREFS_COLLAPSED_VISIBLE_SKILLS,
 	SKILLREFS_EXPAND_FALLBACK,
+	SKILLREFS_REFERENCED_TITLE,
 } from "../config/constants.js";
 import { TEMPLATE } from "../config/templates.js";
 import type { RefOccurrenceInput } from "../ref-injection/RefInjectionAdapter.js";
@@ -24,6 +22,8 @@ import {
 } from "../ref-injection/RefInjectionDomain.js";
 
 const SKILLREFS_CUSTOM_TYPE = "pi-skillrefs";
+const ANSI_DIM = "\x1b[2m";
+const ANSI_DIM_RESET = "\x1b[22m";
 const LOOSE_OBJECT = { additionalProperties: true };
 const SKILL_REF_PATTERN = /(?:^|(?<=\s))\$([a-zA-Z][a-zA-Z0-9\-_]*)/gu;
 
@@ -176,6 +176,10 @@ function themeFg(
 	return theme?.fg(role, text) ?? text;
 }
 
+function dimAccentText(text: string, theme: RendererTheme | undefined): string {
+	return `${ANSI_DIM}${themeFg("customMessageLabel", text, theme)}${ANSI_DIM_RESET}`;
+}
+
 const SkillInjectionModeSchema = Type.Union([
 	Type.Literal("full"),
 	Type.Literal("reminder"),
@@ -239,22 +243,18 @@ export const skillrefsRefInjection: SkillrefsDomain = createRefInjectionDomain({
 		},
 	},
 	renderer: {
-		visibleItems: SKILLREFS_COLLAPSED_VISIBLE_SKILLS,
+		summaryTitle: SKILLREFS_REFERENCED_TITLE,
 		getExpandKey,
 		boxBackground: (text, theme) => theme?.bg("customMessageBg", text) ?? text,
 		messageText: (text, theme) => themeFg("customMessageText", text, theme),
-		dimText: (text, theme) => themeFg("dim", text, theme),
-		itemLine: ({ item, formatTokenCount, theme }) => {
-			const title = item.mode === "reminder"
-				? SKILL_REMINDER_SUMMARY_TITLE
-				: SKILL_SUMMARY_TITLE;
-			return themeFg("customMessageLabel", title, theme)
-				+ themeFg(
-					"customMessageText",
-					` ${TEMPLATE.skillSummary(item.label, formatTokenCount(item.tokenCount))}`,
-					theme,
-				);
-		},
+		dimText: dimAccentText,
+		itemLine: ({ item, formatTokenCount, theme }) =>
+			themeFg("customMessageLabel", item.ref, theme)
+			+ themeFg(
+				"customMessageText",
+				` ${TEMPLATE.skillReferenceTokenCount(formatTokenCount(item.tokenCount))}`,
+				theme,
+			),
 		expandHint: (expandKey) => TEMPLATE.expandHint(expandKey),
 		expandedSummary: ({ itemLines, content }) =>
 			TEMPLATE.expandedSkillSummaries(itemLines, content),

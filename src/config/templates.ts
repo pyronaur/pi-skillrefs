@@ -11,8 +11,8 @@ export const TEMPLATE = {
 	skillReminder(ref: string): string {
 		return `Reminder to use ${ref}`;
 	},
-	skillSummary(label: string, tokenCount: string): string {
-		return `${label} (${tokenCount} tokens)`;
+	skillReferenceTokenCount(tokenCount: string): string {
+		return `(${tokenCount} tokens)`;
 	},
 	expandHint(key: string): string {
 		return `(${key} to expand)`;
