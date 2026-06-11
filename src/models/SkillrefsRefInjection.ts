@@ -2,6 +2,7 @@ import type { ContextEvent, MessageRenderer, SessionEntry } from "@earendil-work
 import { keyText } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
+import { color } from "../colors.js";
 import {
 	SKILLREFS_EXPAND_FALLBACK,
 	SKILLREFS_REFERENCED_TITLE,
@@ -28,7 +29,6 @@ const LOOSE_OBJECT = { additionalProperties: true };
 const SKILL_REF_PATTERN = /(?:^|(?<=\s))\$([a-zA-Z][a-zA-Z0-9\-_]*)/gu;
 
 type RendererTheme = Parameters<MessageRenderer>[2];
-type ThemeRole = Parameters<RendererTheme["fg"]>[0];
 
 export type SkillInjectionMode = Static<typeof SkillInjectionModeSchema>;
 export type SkillrefsMessageSkill = Static<typeof SkillrefsMessageSkillSchema> & RefInjectionItem;
@@ -168,16 +168,8 @@ function skillrefsFullRefs(details: unknown, items: SkillrefsMessageSkill[]): st
 	return [...refs];
 }
 
-function themeFg(
-	role: ThemeRole,
-	text: string,
-	theme: RendererTheme | undefined,
-): string {
-	return theme?.fg(role, text) ?? text;
-}
-
-function dimAccentText(text: string, theme: RendererTheme | undefined): string {
-	return `${ANSI_DIM}${themeFg("customMessageLabel", text, theme)}${ANSI_DIM_RESET}`;
+function dimText(text: string, theme: RendererTheme | undefined): string {
+	return `${ANSI_DIM}${color.textMuted.fg(text, theme)}${ANSI_DIM_RESET}`;
 }
 
 const SkillInjectionModeSchema = Type.Union([
@@ -245,13 +237,12 @@ export const skillrefsRefInjection: SkillrefsDomain = createRefInjectionDomain({
 	renderer: {
 		summaryTitle: SKILLREFS_REFERENCED_TITLE,
 		getExpandKey,
-		boxBackground: (text, theme) => theme?.bg("customMessageBg", text) ?? text,
-		messageText: (text, theme) => themeFg("customMessageText", text, theme),
-		dimText: dimAccentText,
+		boxBackground: color.container.bg,
+		messageText: color.text.fg,
+		dimText,
 		itemLine: ({ item, formatTokenCount, theme }) =>
-			themeFg("customMessageLabel", item.ref, theme)
-			+ themeFg(
-				"customMessageText",
+			color.tag.fg(item.ref, theme)
+			+ color.text.fg(
 				` ${TEMPLATE.skillReferenceTokenCount(formatTokenCount(item.tokenCount))}`,
 				theme,
 			),

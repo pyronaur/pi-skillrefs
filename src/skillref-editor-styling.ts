@@ -1,4 +1,5 @@
 import { CustomEditor, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { color } from "./colors.js";
 
 const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])`,
 	"gu");
@@ -121,7 +122,10 @@ export function installSkillrefEditorStyling(
 	ui: SkillrefEditorUI,
 	getSkills: () => SkillMapLookup,
 ): void {
-	const styleSkillref = (ref: string) => ui.theme.fg("accent", ui.theme.bold(ref));
+	const styleSkillref = (ref: string) => {
+		const text = ui.theme.bold(ref);
+		return color.tag.fg(text, ui.theme);
+	};
 	if (!patchedUis.has(ui)) {
 		const originalSetEditorComponent = ui.setEditorComponent.bind(ui);
 		ui.setEditorComponent = (factory) => {

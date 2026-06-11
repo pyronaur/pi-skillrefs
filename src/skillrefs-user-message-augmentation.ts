@@ -1,5 +1,6 @@
 import { InteractiveMode, type MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, Text } from "@earendil-works/pi-tui";
+import { color } from "./colors.js";
 import { SKILLREFS_EXPAND_FALLBACK } from "./config/constants.js";
 import { TEMPLATE } from "./config/templates.js";
 import type { SkillrefsCustomMessage } from "./models/SkillrefsCustomMessage.js";
@@ -94,13 +95,13 @@ function getKeyText(host: InteractiveModeInstance, keybinding: string): string |
 
 function statusText(refs: string[], message: string, theme: RendererTheme): string {
 	return [
-		theme.fg("customMessageLabel", `Skillrefs: ${refs.join(", ")}`),
-		theme.fg("customMessageText", message),
+		color.tag.fg(`Skillrefs: ${refs.join(", ")}`, theme),
+		color.text.fg(message, theme),
 	].join("\n");
 }
 
 function renderBox(text: string, theme: RendererTheme): Component {
-	const box = new Box(1, 1, (content) => theme.bg("customMessageBg", content));
+	const box = new Box(1, 1, (content) => color.container.bg(content, theme));
 	box.addChild(new Text(text, 0, 0));
 	return box;
 }
@@ -131,9 +132,7 @@ class SkillrefsUserMessageComponent implements Component {
 		}
 	}
 
-	invalidate(): void {
-		return;
-	}
+	invalidate(): void {}
 
 	render(width: number): string[] {
 		if (!this.expanded && this.loadState.status === "loaded") {
@@ -144,8 +143,8 @@ class SkillrefsUserMessageComponent implements Component {
 
 		if (!this.expanded) {
 			return renderBox([
-				this.theme.fg("customMessageLabel", `Skillrefs: ${this.refs.join(", ")}`),
-				this.theme.fg("dim", TEMPLATE.expandHint(this.expandKey)),
+				color.tag.fg(`Skillrefs: ${this.refs.join(", ")}`, this.theme),
+				color.textMuted.fg(TEMPLATE.expandHint(this.expandKey), this.theme),
 			].join("\n"), this.theme).render(width);
 		}
 
