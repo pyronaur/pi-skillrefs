@@ -29,7 +29,6 @@ import {
 import { renderSkillrefsMessage } from "./render-skillrefs-message.js";
 import { installSkillrefEditorStyling } from "./skillref-editor-styling.js";
 import {
-	contextMessagesForSkillrefsRender,
 	sessionContextMessages,
 } from "./skillrefs-render-context.js";
 import { installSkillrefsUserMessageAugmentation } from "./skillrefs-user-message-augmentation.js";
@@ -316,10 +315,8 @@ function prepareSkillrefsUserMessageLoader(
 			input.state,
 			input.text,
 			await renderFullRefs.fullRefsFor({
-				messages: contextMessagesForSkillrefsRender(input.ctx, {
-					text: input.text,
-					source: input.renderContext.source,
-				}),
+				messages: sessionContextMessages(input.ctx),
+				branch: sessionBranch(input.ctx),
 				buildContext: {
 					buildSkillrefsCustomMessage: (messageText, fullRefs) =>
 						buildSkillrefsCustomMessage(input.state, messageText, fullRefs),

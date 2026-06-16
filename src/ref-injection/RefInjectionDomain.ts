@@ -25,6 +25,7 @@ import {
 	refInjectionRenderFullRefs,
 	type RefRenderSource,
 } from "./RefInjectionRenderBaseline.js";
+import { refInjectionRenderMessages } from "./RefInjectionRenderMessages.js";
 
 type RefInjectionDomainAdapterConfig<TMessage, TBranchEntry> = Omit<
 	RefInjectionAdapter<TMessage, TBranchEntry>,
@@ -42,8 +43,9 @@ type RefInjectionDomainBuildMessageInput<TRenderContext> = {
 	buildContext: TRenderContext;
 };
 
-type RefInjectionDomainRenderFullRefsInput<TMessage, TRenderContext> = {
+type RefInjectionDomainRenderFullRefsInput<TMessage, TBranchEntry, TRenderContext> = {
 	messages: readonly TMessage[] | undefined;
+	branch: readonly TBranchEntry[];
 	text: string;
 	renderIndex: number;
 	source: RefRenderSource;
@@ -106,7 +108,7 @@ export type RefInjectionDomain<
 	};
 	render: {
 		fullRefsFor(
-			input: RefInjectionDomainRenderFullRefsInput<TMessage, TRenderContext>,
+			input: RefInjectionDomainRenderFullRefsInput<TMessage, TBranchEntry, TRenderContext>,
 		): Promise<Set<string>>;
 	};
 	message: RefInjectionCustomMessages<TCustomType, TItem>;
@@ -232,12 +234,20 @@ class RefInjectionDomainBuilder<
 		TRenderContext
 	>["render"] {
 		return {
-			fullRefsFor: (input) =>
-				refInjectionRenderFullRefs({
+			fullRefsFor: (input) => {
+				const replay = refInjectionRenderMessages({
+					adapter: this.adapter,
 					messages: input.messages,
+					branch: input.branch,
 					text: input.text,
 					renderIndex: input.renderIndex,
 					source: input.source,
+				});
+				return refInjectionRenderFullRefs({
+					messages: replay.messages,
+					text: input.text,
+					renderIndex: input.renderIndex,
+					source: replay.source,
 					knownFullRefs: input.knownFullRefs,
 					fallbackFullRefs: input.fallbackFullRefs,
 					occurrenceFromMessage: (messageInput) => this.adapter.occurrenceFromMessage(messageInput),
@@ -249,7 +259,8 @@ class RefInjectionDomainBuilder<
 							fullRefs,
 							buildContext: input.buildContext,
 						}),
-				}),
+				});
+			},
 		};
 	}
 

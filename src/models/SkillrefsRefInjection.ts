@@ -81,6 +81,14 @@ function textFromUserMessage(message: ContextMessage): string | undefined {
 	return text || undefined;
 }
 
+function userMessageFromText(text: string): ContextMessage {
+	return {
+		role: "user",
+		content: text,
+		timestamp: Date.now(),
+	};
+}
+
 function skillrefsInputFromText(text: string): RefOccurrenceInput | undefined {
 	const refs = new Set<string>();
 	for (const match of text.matchAll(SKILL_REF_PATTERN)) {
@@ -201,6 +209,7 @@ export const skillrefsRefInjection: SkillrefsDomain = createRefInjectionDomain({
 		occurrenceFromText: skillrefsInputFromText,
 		occurrenceFromMessage: skillrefsInputFromMessage,
 		textFromUserMessage,
+		userMessageFromText,
 		textFromBranchEntry: textFromSessionEntry,
 		branchEntryHasContextMessage: (entry) =>
 			entry.type === "message" || entry.type === "custom_message",

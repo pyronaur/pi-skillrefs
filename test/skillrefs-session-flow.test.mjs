@@ -282,6 +282,15 @@ function assertNoPersistedSkillrefsMessages(sessionManager) {
 	assert.deepEqual(persisted, []);
 }
 
+async function renderNativeSkillRow(input) {
+	currentAddMessageToChat().call(
+		input.host,
+		{ role: "user", content: input.prompt },
+		input.populateHistory ? { populateHistory: true } : undefined,
+	);
+	return waitForRenderedChild(input.children, input.index, /<skill ref="\$day"/u);
+}
+
 afterEach(async () => {
 	restoreInteractiveModePatch();
 	await Promise.all(dirsToRemove.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -332,6 +341,101 @@ void test("compaction resets skill refs so the next successful mention injects f
 		assert.deepEqual(skillModesAfterPrompt(flow.captures[3], "After compact $day", "$day"), [
 			"full",
 		]);
+	} finally {
+		await flow.close();
+	}
+});
+
+void test("historical native full skill rows remain full after compaction chat rebuild", {
+	timeout: 5000,
+}, async () => {
+	Reflect.set(InteractiveMode.prototype, "addMessageToChat", () => undefined);
+	const firstPrompt = "Before compact $day";
+	const repeatPrompt = "Before compact again $day";
+	const flow = await createFlow({
+		compactionFirstKeptPrefix: firstPrompt,
+		hasUI: true,
+	});
+	const live = createChatHost({ expanded: true });
+	flow.faux.setResponses([
+		captureText(flow.captures, "ASSISTANT_PRE_COMPACT_DAY_1_SENTINEL"),
+		captureText(flow.captures, "ASSISTANT_PRE_COMPACT_DAY_2_SENTINEL"),
+	]);
+
+	try {
+		const firstLiveRow = await renderNativeSkillRow({
+			host: live.host,
+			children: live.children,
+			index: 0,
+			prompt: firstPrompt,
+		});
+		await flow.session.prompt(firstPrompt);
+		await renderNativeSkillRow({
+			host: live.host,
+			children: live.children,
+			index: 1,
+			prompt: repeatPrompt,
+		});
+		await flow.session.prompt(repeatPrompt);
+		await flow.session.compact();
+
+		const history = createChatHost({ expanded: true });
+		const firstHistoryRow = await renderNativeSkillRow({
+			host: history.host,
+			children: history.children,
+			index: 0,
+			prompt: firstPrompt,
+		});
+		await renderNativeSkillRow({
+			host: history.host,
+			children: history.children,
+			index: 1,
+			prompt: repeatPrompt,
+		});
+
+		assert.match(firstLiveRow, /DAY_SKILL_SENTINEL/u);
+		assert.match(firstHistoryRow, /DAY_SKILL_SENTINEL/u);
+	} finally {
+		await flow.close();
+	}
+});
+
+void test("native skill rows match provider full mode after compaction", {
+	timeout: 5000,
+}, async () => {
+	Reflect.set(InteractiveMode.prototype, "addMessageToChat", () => undefined);
+	const firstPrompt = "Before compact $day";
+	const postCompactPrompt = "After compact $day";
+	const flow = await createFlow({
+		compactionFirstKeptPrefix: firstPrompt,
+		hasUI: true,
+	});
+	const { children, host } = createChatHost({ expanded: true });
+	flow.faux.setResponses([
+		captureText(flow.captures, "ASSISTANT_PRE_COMPACT_DAY_SENTINEL"),
+		captureText(flow.captures, "ASSISTANT_POST_COMPACT_DAY_SENTINEL"),
+	]);
+
+	try {
+		await flow.session.prompt(firstPrompt);
+		await flow.session.compact();
+
+		const visualContext = await renderNativeSkillRow({
+			host,
+			children,
+			index: 0,
+			prompt: postCompactPrompt,
+		});
+		await flow.session.prompt(postCompactPrompt);
+		const providerBlocks = injectedSkillBlocksAfterPrompt(
+			lastProviderTurn(flow.captures),
+			postCompactPrompt,
+			"$day",
+		);
+
+		assert.equal(providerBlocks.length, 1);
+		assert.match(providerBlocks[0] ?? "", /DAY_SKILL_SENTINEL/u);
+		assert.match(visualContext, /DAY_SKILL_SENTINEL/u);
 	} finally {
 		await flow.close();
 	}
@@ -396,8 +500,12 @@ void test("native skill rows match provider reminder mode after summarized tree 
 		await flow.session.prompt(postCompactPrompt);
 		await flow.session.navigateTree(firstAssistantEntry.id, { summarize: true });
 
-		currentAddMessageToChat().call(host, { role: "user", content: repeatedPrompt });
-		const visualContext = await waitForRenderedChild(children, 0, /<skill ref="\$day"/u);
+		const visualContext = await renderNativeSkillRow({
+			host,
+			children,
+			index: 0,
+			prompt: repeatedPrompt,
+		});
 		await flow.session.prompt(repeatedPrompt);
 		const providerBlocks = injectedSkillBlocksAfterPrompt(
 			lastProviderTurn(flow.captures),

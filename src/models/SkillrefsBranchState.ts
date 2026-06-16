@@ -17,6 +17,7 @@ type RenderBaseline = {
 type PreparedRenderFullRefs = {
 	fullRefsFor(input: {
 		messages: ContextEvent["messages"] | undefined;
+		branch: readonly SessionEntry[];
 		buildContext: SkillrefsRenderBuildContext;
 	}): Promise<Set<string>>;
 };
@@ -83,6 +84,7 @@ export class SkillrefsBranchState {
 			fullRefsFor: (request) =>
 				skillrefsRefInjection.render.fullRefsFor({
 					messages: request.messages,
+					branch: request.branch,
 					text: input.text,
 					renderIndex: input.index,
 					source: input.source,
