@@ -42,14 +42,14 @@
     "testDupes": "jscpd --config .jscpd.tests.json test"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "0.79.1",
-    "@earendil-works/pi-tui": "0.79.1",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.80.6",
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.79.1",
-    "@earendil-works/pi-coding-agent": "0.79.1",
-    "@earendil-works/pi-tui": "0.79.1",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.80.6",
     "@oxlint/plugins": "latest",
     "@types/node": "latest",
     "dprint": "0.54.0",
