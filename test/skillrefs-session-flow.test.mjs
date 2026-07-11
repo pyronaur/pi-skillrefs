@@ -1,8 +1,8 @@
 import {
 	fauxAssistantMessage,
 	fauxText,
-	registerFauxProvider,
 } from "@earendil-works/pi-ai";
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import {
 	AuthStorage,
 	createAgentSession,
