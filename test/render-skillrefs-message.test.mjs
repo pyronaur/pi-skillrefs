@@ -41,10 +41,10 @@ function skill(overrides = {}) {
 }
 
 void describe("render-skillrefs-message", () => {
-	void test("parses historical injected_skill blocks", () => {
+	void test("parses injected_skill alias blocks with explicit mode", () => {
 		const parsed = SkillrefsContextMessage.parse([
 			"<environment_context>",
-			"<injected_skill ref=\"$day\" path=\"/tmp/day.md\">",
+			"<injected_skill ref=\"$day\" path=\"/tmp/day.md\" mode=\"full\">",
 			"Legacy body.",
 			"</injected_skill>",
 			"</environment_context>",
@@ -52,6 +52,7 @@ void describe("render-skillrefs-message", () => {
 
 		assert.equal(parsed?.skills[0]?.ref, "$day");
 		assert.equal(parsed?.skills[0]?.path, "/tmp/day.md");
+		assert.equal(parsed?.skills[0]?.mode, "full");
 		assert.equal(parsed?.skills[0]?.body, "Legacy body.");
 	});
 
@@ -64,7 +65,7 @@ void describe("render-skillrefs-message", () => {
 			timestamp: Date.now(),
 			details: {
 				injectedContent:
-					`<environment_context>\n<skill ref="$day">\n# Day Skill\n\nRest.\n</skill>\n</environment_context>`,
+					`<environment_context>\n<skill ref="$day" mode="full">\n# Day Skill\n\nRest.\n</skill>\n</environment_context>`,
 				skills: [skill({ tokenCount: 8230 })],
 			},
 		});
@@ -89,7 +90,7 @@ void describe("render-skillrefs-message", () => {
 			timestamp: Date.now(),
 			details: {
 				injectedContent:
-					`<environment_context>\n<skill ref="$day" path="/tmp/day.md">Reminder to use $day</skill>\n</environment_context>`,
+					`<environment_context>\n<skill ref="$day" path="/tmp/day.md" mode="reminder">Reminder to use $day</skill>\n</environment_context>`,
 				skills: [skill({ mode: "reminder", tokenCount: 36 })],
 			},
 		}).join("\n");
@@ -144,7 +145,7 @@ void describe("render-skillrefs-message", () => {
 
 	void test("renders injected content when expanded", () => {
 		const injectedContent =
-			`<environment_context>\n<skill ref="$day" path="/tmp/day.md">Reminder to use $day</skill>\n</environment_context>`;
+			`<environment_context>\n<skill ref="$day" path="/tmp/day.md" mode="reminder">Reminder to use $day</skill>\n</environment_context>`;
 		const rendered = renderExpanded({
 			role: "custom",
 			customType: "pi-skillrefs",
@@ -161,7 +162,7 @@ void describe("render-skillrefs-message", () => {
 		assert.match(text, /\$day/u);
 		assert.match(text, /\b36\b/u);
 		assert.match(text, /<environment_context>/u);
-		assert.match(text, /<skill ref="\$day" path="\/tmp\/day\.md">/u);
+		assert.match(text, /<skill ref="\$day" path="\/tmp\/day\.md" mode="reminder">/u);
 		assert.doesNotMatch(text, /Day Skill/u);
 	});
 });

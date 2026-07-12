@@ -36,21 +36,21 @@ Or add it directly to Pi settings:
 
 ```xml
 <environment_context>
-<injected_skill ref="$day" path="/absolute/resolved/path/to/day/SKILL.md">
+<skill ref="$day" path="/absolute/resolved/path/to/day/SKILL.md" mode="full">
 # Day Skill
 
 ...
-</injected_skill>
+</skill>
 
-<injected_skill ref="$night" path="/absolute/resolved/path/to/night/SKILL.md">
+<skill ref="$night" path="/absolute/resolved/path/to/night/SKILL.md" mode="full">
 # Night Skill
 
 ...
-</injected_skill>
+</skill>
 </environment_context>
 ```
 
-Reminder injections keep the same wrapper and attributes, but replace the body with a short reminder string.
+Reminder injections use `mode="reminder"` and replace the body with a short reminder string.
 
 ## Transcript behavior
 

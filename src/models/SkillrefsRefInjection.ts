@@ -132,21 +132,6 @@ function renderSkill(
 	);
 }
 
-function inferSkillInjectionMode(
-	ref: string,
-	body: string,
-	path: string | undefined,
-): SkillInjectionMode {
-	if (path === undefined) {
-		return "full";
-	}
-	if (body !== TEMPLATE.skillReminder(ref)) {
-		return "full";
-	}
-
-	return "reminder";
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
@@ -230,7 +215,8 @@ export const skillrefsRefInjection: SkillrefsDomain = createRefInjectionDomain({
 		renderBlock: renderSkill,
 		blockFromAttributes(input): SkillrefsContextBlock | undefined {
 			const ref = input.attributes.get("ref");
-			if (!ref) {
+			const mode = input.attributes.get("mode");
+			if (!ref || !Check(SkillInjectionModeSchema, mode)) {
 				return undefined;
 			}
 
@@ -238,7 +224,7 @@ export const skillrefsRefInjection: SkillrefsDomain = createRefInjectionDomain({
 			return {
 				ref,
 				body: input.body,
-				mode: inferSkillInjectionMode(ref, input.body, path),
+				mode,
 				...(path === undefined ? {} : { path }),
 			};
 		},

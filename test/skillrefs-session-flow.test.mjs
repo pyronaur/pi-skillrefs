@@ -62,16 +62,17 @@ function injectedSkillBlocksAfterPrompt(turn, prompt, ref) {
 	const nextUser = turn.slice(promptIndex + 1).find((message) => message.role === "user");
 	assert.ok(nextUser);
 	const pattern = new RegExp(
-		`<skill ref="\\${ref}" path="[^"]*">([\\s\\S]*?)<\\/skill>`,
+		`<skill ref="\\${ref}" path="[^"]*" mode="(full|reminder)">([\\s\\S]*?)<\\/skill>`,
 		"gu",
 	);
-	return [...nextUser.text.matchAll(pattern)].map((match) => match[1] ?? "");
+	return [...nextUser.text.matchAll(pattern)].map((match) => ({
+		mode: match[1] ?? "",
+		body: match[2] ?? "",
+	}));
 }
 
 function skillModesAfterPrompt(turn, prompt, ref) {
-	return injectedSkillBlocksAfterPrompt(turn, prompt, ref).map((body) =>
-		body === `Reminder to use ${ref}` ? "reminder" : "full"
-	);
+	return injectedSkillBlocksAfterPrompt(turn, prompt, ref).map((block) => block.mode);
 }
 
 function lastProviderTurn(captures) {
@@ -434,7 +435,7 @@ void test("native skill rows match provider full mode after compaction", {
 		);
 
 		assert.equal(providerBlocks.length, 1);
-		assert.match(providerBlocks[0] ?? "", /DAY_SKILL_SENTINEL/u);
+		assert.match(providerBlocks[0]?.body ?? "", /DAY_SKILL_SENTINEL/u);
 		assert.match(visualContext, /DAY_SKILL_SENTINEL/u);
 	} finally {
 		await flow.close();
@@ -514,7 +515,7 @@ void test("native skill rows match provider reminder mode after summarized tree 
 		);
 
 		assert.equal(providerBlocks.length, 1);
-		assert.doesNotMatch(providerBlocks[0] ?? "", /DAY_SKILL_SENTINEL/u);
+		assert.doesNotMatch(providerBlocks[0]?.body ?? "", /DAY_SKILL_SENTINEL/u);
 		assert.match(visualContext, /<skill ref="\$day"/u);
 		assert.doesNotMatch(visualContext, /DAY_SKILL_SENTINEL/u);
 	} finally {
